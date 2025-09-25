@@ -650,7 +650,27 @@ function renderAll(){
 renderAll();
 window.addEventListener('resize',fitPodsCard);
 setInterval(()=>document.getElementById("now").textContent=new Date().toLocaleString(),1000);
+/* ===== Force login on page load ===== */
+document.addEventListener("DOMContentLoaded", async () => {
+  try {
+    await ensureLogin();   // trigger login immediately
+    renderAll();           // re-render once logged in (so edit buttons show correctly)
+    console.log("[MSAL] Login completed on page load");
+  } catch (err) {
+    console.error("[MSAL] Login failed on page load:", err);
+    // Show a clear message to the user
+    const body = document.querySelector("body");
+    if (body) {
+      body.innerHTML = `
+        <div style="color:white; background:#0d1b2a; height:100vh; display:flex; align-items:center; justify-content:center; text-align:center; flex-direction:column;">
+          <h2>Login Required</h2>
+          <p>Please refresh the page and sign in with your AEC account to use the dashboard.</p>
+        </div>
+      `;
+    }
+  }
+});
 </script>
-
 </body>
 </html>
+
