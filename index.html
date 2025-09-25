@@ -665,40 +665,86 @@ function applyPermissions(){
   document.getElementById("buildAddRow").style.display=canEdit?"inline-block":"none";
 }
 
-/* ------- Main render ------- */
+/* ===== Main render ===== */
 function renderAll(){
-  const d = store.getDay(state.location,state.date);
+  const d = store.getDay(state.location, state.date);
   const equip = store.getEquip(state.location);
   const build = store.getBuild(state.location);
+
   renderTopbar(d);
   renderPods(d);
   renderTests(d);
   renderEquipTable(equip);
   renderBuildTable(build);
+
   document.getElementById("notesBox").value = d.notes;
   document.getElementById("staffingBox").value = d.staffing;
+
   fitPodsCard();
   applyPermissions();
 }
 
-// Remove the plain renderAll() here
-// renderAll();
+/* ===== Pods Loader (from SharePoint) ===== */
+async function loadPodsFromSharePoint() {
+  try {
+    const token = await getToken();
+    const title = `${state.location} ${state.date}`;
+    const filter = encodeURIComponent(`fields/Title eq '${title}'`);
+    const url =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
+      `/lists/${podsListId}/items?` +
+      `$expand=fields($select=Title,Location,Date,DataJson)&$filter=${filter}`;
 
-// Keep this (resizing and clock updater)
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (!res.ok) {
+      console.error("[SP] Pods load failed:", res.status, await res.text());
+      return;
+    }
+
+    const json = await res.json();
+    if (!json.value || json.value.length === 0) {
+      console.log("[SP] No Pods item found for", title);
+      return;
+    }
+
+    const fields = json.value[0].fields || {};
+    let parsed = {};
+    try {
+      parsed = fields.DataJson ? JSON.parse(fields.DataJson) : {};
+    } catch (e) {
+      console.warn("[SP] Pods DataJson parse error:", e);
+      parsed = {};
+    }
+
+    const d = store.getDay(state.location, state.date);
+    d.pods = parsed;
+    store.save();
+    renderPods(d);
+    console.log("[SP] Pods loaded from SharePoint for", title, parsed);
+  } catch (err) {
+    console.error("[SP] Pods load threw error:", err);
+  }
+}
+
+/* ===== Window events ===== */
 window.addEventListener('resize', fitPodsCard);
 setInterval(() => {
-  document.getElementById("now").textContent = new Date().toLocaleString();
+  const nowEl = document.getElementById("now");
+  if (nowEl) nowEl.textContent = new Date().toLocaleString();
 }, 1000);
 
 /* ===== Force login on page load ===== */
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    await ensureLogin();   // trigger login immediately
-    renderAll();           // re-render once logged in (so edit buttons show correctly)
+    await ensureLogin();
+    renderAll();
+    await loadPodsFromSharePoint();
     console.log("[MSAL] Login completed on page load");
   } catch (err) {
     console.error("[MSAL] Login failed on page load:", err);
-    // Show a clear message to the user
     const body = document.querySelector("body");
     if (body) {
       body.innerHTML = `
@@ -713,6 +759,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
+
 
 
 
