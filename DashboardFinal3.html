@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Operations Dashboard</title>
+
+<!-- MSAL library -->
+<script src="https://alcdn.msauth.net/browser/2.38.1/js/msal-browser.min.js"></script>
+
+<script>
+/* ===== MSAL + Graph Config ===== */
+const loginScopes = ["openid", "profile", "User.Read"];
+const graphScopes = ["Sites.ReadWrite.All"];
+
+const msalConfig = {
+  auth: {
+    clientId: "ec19d272-57da-4130-b8a7-68500bcb0ac6",
+    authority: "https://login.microsoftonline.com/2f061df2-aea0-4206-9047-e0b42ffd47b4",
+    redirectUri: "http://localhost:3000"
+  },
+  cache: { cacheLocation: "localStorage", storeAuthStateInCookie: false },
+  system: { allowNativeBroker: false, navigateToLoginRequestUrl: false }
+};
+const msalInstance = new msal.PublicClientApplication(msalConfig);
+
+/* ===== Login & Token ===== */
+async function ensureLogin() {
+  let account = msalInstance.getAllAccounts()[0];
+  if (!account) {
+    const resp = await msalInstance.loginPopup({ scopes: loginScopes, prompt: "select_account" });
+    msalInstance.setActiveAccount(resp.account);
+    account = resp.account;
+  }
+  return account;
+}
+async function getToken() {
+  const account = await ensureLogin();
+  try {
+    const r = await msalInstance.acquireTokenSilent({ scopes: graphScopes, account });
+    return r.accessToken;
+  } catch (e) {
+    console.warn("[MSAL] Silent token failed, falling back to popup:", e);
+    const r = await msalInstance.acquireTokenPopup({ scopes: graphScopes, account });
+    return r.accessToken;
+  }
+}
+
+/* ===== SharePoint IDs ===== */
+const siteId = "associatedeyecareazure.sharepoint.com,f7f8c2bf-c387-440c-8d96-1373fb6e8517,adcaee90-7252-4f40-86f1-3d8c0dc8b216";
+const podsListId = "b4cf5247-2062-4440-8fb5-338f2a09cc1c";
+const testsListId = "369707df-a571-4ba6-a04b-1aea8b3ef66f";
+const notesListId = "771054d8-ecc7-40e8-ab57-9488af13e727";
+const staffingListId = "204e2f8f-afb9-4f0b-98be-90e18c5a4308";
+const pfcListId = "a7786d2e-f0f1-499f-90e4-df668b927ebf";
+const patientCountListId = "d151ffc1-5d78-4aec-8689-5f558f7d9b20";
+const equipListId = "a72e0d60-faca-4421-b137-b0f537745ccc";
+const buildListId = "14dee9e3-b932-472e-a93f-b7da9abb9ad3";
+
+/* ===== Save Helpers ===== */
+async function saveToList(listId, title, dataObj) {
+  const item = {
+    fields: {
+      Title: title,
+      Location: state.location,
+      Date: state.date,
+      DataJson: JSON.stringify(dataObj)
+    }
+  };
+  return doSave(listId, item);
+}
+
+/* For lists that do NOT have a Date column (Equipment, Building) */
+async function saveToListNoDate(listId, title, dataObj) {
+  const item = {
+    fields: {
+      Title: title,
+      Location: state.location,
+      DataJson: JSON.stringify(dataObj)
+    }
+  };
+  return doSave(listId, item);
+}
+
+async function saveSimpleToList(listId, title, fieldName, value) {
+  const item = { fields: { Title: title } };
+  item.fields[fieldName] = value;
+  return doSave(listId, item);
+}
+async function doSave(listId, item) {
+  try {
+    const token = await getToken();
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`,
+      {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(item)
+      }
+    );
+    if (!res.ok) {
+      console.error("[SP] Save failed:", res.status, await res.text());
+    } else {
+      const data = await res.json();
+      console.log(`Saved to list ${listId}. Item ID:`, data.id);
+    }
+  } catch (err) {
+    console.error("[SP] Save failed:", err);
+  }
+}
+
+/* ===== Section Save Functions ===== */
+async function savePodsToSharePoint(d)  { await saveToList(podsListId,   `${state.location} ${state.date}`,              d.pods); }
+async function saveTestsToSharePoint(d) { await saveToList(testsListId,  `${state.location} ${state.date} - Tests`,     d.tests); }
+async function saveNotesToSharePoint(d) { await saveToList(notesListId,  `${state.location} ${state.date} - Notes`,     d.notes); }
+async function saveStaffingToSharePoint(d){ await saveToList(staffingListId, `${state.location} ${state.date} - Staffing`, d.staffing); }
+async function savePfcToSharePoint(d) {
+  await saveSimpleToList(pfcListId, `${state.location} ${state.date} - PFC`, "PFC", d.pfc);
+  console.log("PFC saved to SharePoint:", d.pfc);
+}
+async function savePatientCountToSharePoint(d) {
+  await saveSimpleToList(patientCountListId, `${state.location} ${state.date} - PatientCount`, "Count", d.todayCount);
+  console.log("Patient Count saved to SharePoint:", d.todayCount);
+}
+
+/* IMPORTANT: no-date helpers for Equipment/Building */
+async function saveEquipToSharePoint(d)  { await saveToListNoDate(equipListId, `${state.location} - Equipment`, d.equipment); }
+async function saveBuildToSharePoint(d)  { await saveToListNoDate(buildListId, `${state.location} - Building`,  d.building); }
+
+/* ===== DOM Handlers (top-level saves that include Graph posts) ===== */
+document.addEventListener("DOMContentLoaded", () => {
+  // Pods
+  document.getElementById("savePods")?.addEventListener("click", async () => {
+    const d = store.getDay(state.location, state.date);
+    ["podA","podB","podC","podD"].forEach(id => {
+      const prov = document.getElementById(id+"prov");
+      if (prov) {
+        d.pods[id] = {
+          prov: prov.value,
+          ca: document.getElementById(id+"ca").value,
+          techs: document.getElementById(id+"techs").value
+        };
+      }
+    });
+    ["resident","contactLens","float","aScan","lasik"].forEach(id => {
+      const el = document.getElementById(id+"Val");
+      if (el) d.pods[id] = { value: el.value };
+    });
+    d.opener = document.getElementById("opener").value;
+    d.zField = document.getElementById("zField").value;
+    if (state.location === "Hudson" || state.location === "Woodbury") {
+      const ortho = document.getElementById("orthoptist");
+      if (ortho) d.orthoptist = ortho.value;
+    } else { d.orthoptist = ""; }
+    store.save();
+    await savePodsToSharePoint(d);
+  });
+
+  // Special Testing
+  document.getElementById("saveTest")?.addEventListener("click", async () => {
+    const d = store.getDay(state.location, state.date);
+    d.tests = [...document.querySelectorAll("#testingFields input")].map(x=>({name:x.value}));
+    store.save();
+    await saveTestsToSharePoint(d);
+  });
+
+  // Notes
+  document.getElementById("notesSave")?.addEventListener("click", async () => {
+    const d = store.getDay(state.location, state.date);
+    d.notes = document.getElementById("notesBox").value;
+    store.save();
+    await saveNotesToSharePoint(d);
+  });
+
+  // Staffing
+  document.getElementById("staffingSave")?.addEventListener("click", async () => {
+    const d = store.getDay(state.location, state.date);
+    d.staffing = document.getElementById("staffingBox").value;
+    store.save();
+    await saveStaffingToSharePoint(d);
+  });
+
+  // PFC (auto-save)
+  document.getElementById("pfcInput")?.addEventListener("change", async () => {
+    const d = store.getDay(state.location, state.date);
+    d.pfc = document.getElementById("pfcInput").value;
+    store.save();
+    await savePfcToSharePoint(d);
+  });
+
+  // Patient Count (auto-save)
+  document.getElementById("todayCount")?.addEventListener("change", async () => {
+    const d = store.getDay(state.location, state.date);
+    d.todayCount = document.getElementById("todayCount").value;
+    store.save();
+    await savePatientCountToSharePoint(d);
+  });
+});
+</script>
+
+<style>
+:root{
+  --bg:#0d1b2a; --ink:#e6edf7; --card:#fff; --card-ink:#14213d;
+  --primary:#0c4da2; --border:#dbe3f8; --gap:10px;
+  --shadow:0 4px 12px rgba(0,0,0,.15),0 1px 3px rgba(0,0,0,.12);
+}
+body{margin:0;padding:12px;background:var(--bg);font:13px Segoe UI,Arial;color:var(--ink);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+h1{margin:0 0 8px;font-size:20px;color:#fff}
+.topbar{display:grid;grid-template-columns:1fr auto 1.2fr;gap:var(--gap);margin-bottom:12px;align-items:center;}
+.mini-card{background:#0f2238;border:1px solid #2a3b52;border-radius:10px;padding:6px 10px;color:#eaf1ff;display:flex;gap:12px}
+.mini-card div{display:flex;flex-direction:column}
+.mini-card label{font-size:11px;font-weight:600}
+.mini-card input{background:#0b1f33;color:#eaf1ff;border:1px solid #2a3b52;border-radius:6px;padding:3px 5px;font-size:12px;width:160px}
+.filters select,.filters input{background:#0f2238;color:#eaf1ff;border:1px solid #2a3b52;border-radius:6px;padding:4px 6px}
+.btn{background:var(--primary);color:#fff;border:0;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px}
+.btn.ghost{background:#eef2ff;color:#333;border:1px solid #ccc}
+.grid{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:var(--gap);align-items:start;overflow:hidden}
+.card{background:var(--card);color:var(--card-ink);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);padding:8px;display:flex;flex-direction:column}
+.section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.section-title h2{margin:0;font-size:14px;color:var(--card-ink)}
+.section-title span.loc-label{font-size:13px;font-weight:600;color:#555;margin-left:6px}
+
+/* Pods */
+#podsCard{display:flex;flex-direction:column;justify-content:flex-start;flex:1;margin-bottom:18px;overflow:hidden;}
+#specialRoles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.pods-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.pod-card{border:1px solid #ddd;border-radius:8px;padding:10px;background:#f8fafc}
+.pod-card h3{margin:0 0 6px;font-size:14px;font-weight:700;color:var(--primary)}
+.pod-card label{font-size:12px;font-weight:600;display:block;margin-top:4px}
+.pod-card input{width:100%;font-size:13px;padding:6px 8px;margin-top:2px;box-sizing:border-box}
+
+/* Special Testing */
+.testing-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.testing-grid input{width:100%;padding:6px 8px;font-size:12px;border:1px solid #ccc;border-radius:6px}
+
+/* Table blocks */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{border:1px solid #e0e6f4;padding:4px}th{background:#f6f8fc;text-align:left}
+td input {
+  width: calc(100% - 8px);
+  box-sizing: border-box;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+/* Notes/Staffing */
+.notes-card textarea,.staffing-card textarea{resize:none;min-height:120px;max-height:120px}
+</style>
+</head>
+<body>
+<h1>Operations Dashboard</h1>
+<div class="topbar">
+  <div>
+    <div id="now"></div>
+    <label>PFC</label><input id="pfcInput"/>
+  </div>
+  <div class="mini-card">
+    <div><label>Today's number of Patients</label><input id="todayCount" type="number"/></div>
+  </div>
+<div class="filters">
+  <label>Location</label>
+  <select id="locationSel"></select>
+  <button id="clearLoc" class="btn ghost">Clear</button>
+  <label>Date</label><input id="dateSel" type="date"/>
+</div>
+
+</div>
+
+<div class="grid">
+  <!-- LEFT: Pods & Assignments -->
+  <div class="card" id="podsCard">
+    <div class="section-title">
+      <h2>Pods & Assignments <span id="podsLoc" class="loc-label"></span></h2>
+      <div>
+        <button id="savePods" class="btn">Save</button>
+        <button id="clearPods" class="btn ghost">Clear</button>
+      </div>
+    </div>
+
+    <!-- Opener & Z -->
+    <div id="specialRoles">
+      <div class="pod-card"><label>Opener</label><input id="opener" placeholder="Opener"></div>
+      <div class="pod-card"><label>Z</label><input id="zField" placeholder="Z"></div>
+    </div>
+
+    <!-- Pods grid -->
+    <div id="podsGrid" class="pods-grid"></div>
+  </div>
+
+  <!-- RIGHT: Testing, Issues, Maintenance, Notes -->
+  <div class="right-grid">
+    <!-- Special Testing -->
+    <div class="card">
+      <div class="section-title">
+        <h2>General Special Testing</h2>
+        <div>
+          <button id="addTest" class="btn">Add</button>
+          <button id="removeTest" class="btn ghost">Remove</button>
+          <button id="saveTest" class="btn">Save</button>
+        </div>
+      </div>
+      <div id="testingFields" class="testing-grid"></div>
+    </div>
+
+    <!-- Equipment Issues -->
+    <div class="card">
+      <div class="section-title"><h2>Equipment Issues</h2><button id="equipAddRow" class="btn">Add Item</button></div>
+      <table id="equipTable">
+        <thead><tr><th>Item</th><th>ETA</th><th>Status</th><th>Notes</th><th>Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Building Maintenance -->
+    <div class="card">
+      <div class="section-title"><h2>Building Maintenance</h2><button id="buildAddRow" class="btn">Add Item</button></div>
+      <table id="buildTable">
+        <thead><tr><th>Item</th><th>ETA</th><th>Status</th><th>Notes</th><th>Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Notes & Staffing -->
+    <div class="card notes-card">
+      <div class="section-title"><h2>Important Information</h2><button id="notesSave" class="btn">Save</button></div>
+      <textarea id="notesBox"></textarea>
+    </div>
+    <div class="card staffing-card">
+      <div class="section-title"><h2>Staffing Impacts</h2><button id="staffingSave" class="btn">Save</button></div>
+      <textarea id="staffingBox"></textarea>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ------- State & store ------- */
+const LOCS = ["Stillwater","Hudson","Woodbury","New Richmond","Lino Lakes"];
+const KEY = "opsDashPodsCA";
+const state = { location: "Stillwater", date: new Date().toISOString().slice(0,10) };
+const store = {
+  _data:null,
+  load(){ 
+    this._data=JSON.parse(localStorage.getItem(KEY)||"null")||{data:{}}; 
+    console.log("[STORE] Loaded data:", this._data);
+  },
+  save(){ 
+    localStorage.setItem(KEY,JSON.stringify(this._data)); 
+    console.log("[STORE] Saved state for", state.location, state.date);
+  },
+  getDay(loc,date){
+    if(!this._data.data[loc]) this._data.data[loc]={};
+    if(!this._data.data[loc][date]) this._data.data[loc][date]={
+      pfc:"", todayCount:"", opener:"", zField:"", orthoptist:"",
+      pods:{}, tests:[{},{},{}], 
+      notes:"", staffing:""
+    };
+    return this._data.data[loc][date];
+  },
+  getEquip(loc){
+    if(!this._data.data[loc]) this._data.data[loc]={};
+    if(!this._data.data[loc].equipment) this._data.data[loc].equipment=[];
+    return this._data.data[loc].equipment;
+  },
+  getBuild(loc){
+    if(!this._data.data[loc]) this._data.data[loc]={};
+    if(!this._data.data[loc].building) this._data.data[loc].building=[];
+    return this._data.data[loc].building;
+  }
+}; 
+store.load();
+
+/* ------- Pods & Assignments ------- */
+function renderPods(day){
+  const allPods=[ 
+    {id:"podA",label:"Pod A"},{id:"podB",label:"Pod B"},
+    {id:"podC",label:"Pod C"},{id:"podD",label:"Pod D"},
+    {id:"resident",label:"Resident"},{id:"contactLens",label:"Contact Lens"},
+    {id:"float",label:"Float"},{id:"aScan",label:"A-Scan"},
+    {id:"lasik",label:"LASIK"} 
+  ];
+
+  const hiddenByLoc={ 
+    "Hudson":["resident","aScan","lasik"], 
+    "Lino Lakes":["resident","aScan","lasik"], 
+    "New Richmond":["resident","aScan","lasik"], 
+    "Woodbury":["aScan","lasik"], 
+    "Stillwater":[] 
+  };
+
+  const grid=document.getElementById("podsGrid");
+  grid.innerHTML="";
+
+  allPods.filter(p=>!hiddenByLoc[state.location].includes(p.id)).forEach(p=>{
+    const d=day.pods[p.id]||{};
+    const card=document.createElement("div");
+    card.className="pod-card";
+    if(p.id.startsWith("pod")){
+      card.innerHTML=`<h3>${p.label}</h3>
+        <label>Provider</label><input id="${p.id}prov" value="${d.prov||""}">
+        <label>CA</label><input id="${p.id}ca" value="${d.ca||""}">
+        <label>Technicians</label><input id="${p.id}techs" value="${d.techs||""}">`;
+    } else {
+      card.innerHTML=`<label>${p.label}</label><input id="${p.id}Val" placeholder="${p.label}" value="${d.value||""}">`;
+    }
+    grid.appendChild(card);
+  });
+
+  if(state.location==="Hudson" || state.location==="Woodbury"){
+    const card=document.createElement("div");
+    card.className="pod-card";
+    card.innerHTML=`<label>Orthoptist</label><input id="orthoptist" placeholder="Orthoptist" value="${day.orthoptist||""}">`;
+    grid.appendChild(card);
+  }
+
+  document.getElementById("opener").value=day.opener||"";
+  document.getElementById("zField").value=day.zField||"";
+}
+
+document.getElementById("savePods").onclick=async ()=>{
+  const d=store.getDay(state.location,state.date);
+  ["podA","podB","podC","podD"].forEach(id=>{
+    const prov=document.getElementById(id+"prov");
+    if(prov){
+      d.pods[id]={ 
+        prov: prov.value, 
+        ca: document.getElementById(id+"ca").value, 
+        techs: document.getElementById(id+"techs").value 
+      };
+    }
+  });
+  ["resident","contactLens","float","aScan","lasik"].forEach(id=>{
+    const el=document.getElementById(id+"Val");
+    if(el){ d.pods[id]={value:el.value}; }
+  });
+  d.opener=document.getElementById("opener").value; 
+  d.zField=document.getElementById("zField").value;
+  if(state.location==="Hudson" || state.location==="Woodbury"){ 
+    const ortho=document.getElementById("orthoptist"); 
+    if(ortho) d.orthoptist=ortho.value; 
+  } else { d.orthoptist=""; }
+  store.save();
+  try { await savePodsToSharePoint(d); } catch(err) { console.error("[SP] Save pods failed:", err); }
+};
+document.getElementById("clearPods").onclick=()=>{
+  const d=store.getDay(state.location,state.date);
+  d.pods={}; d.opener=""; d.zField=""; d.orthoptist="";
+  store.save(); renderPods(d); fitPodsCard();
+};
+
+/* ------- Special Testing ------- */
+function renderTests(d){ 
+  const cont=document.getElementById("testingFields"); 
+  cont.innerHTML=""; 
+  const arr=d.tests.length ? d.tests : [{},{},{}]; 
+  arr.forEach((t,i)=>{ 
+    const input=document.createElement("input"); 
+    input.placeholder="Test "+(i+1); 
+    input.value=t.name||""; 
+    input.id="test"+i; 
+    cont.appendChild(input); 
+  }); 
+}
+document.getElementById("saveTest").onclick=()=>{ 
+  const d=store.getDay(state.location,state.date); 
+  d.tests=[...document.querySelectorAll("#testingFields input")].map(x=>({name:x.value})); 
+  store.save(); 
+};
+document.getElementById("addTest").onclick=()=>{ 
+  const d=store.getDay(state.location,state.date); 
+  d.tests.push({}); 
+  store.save(); renderTests(d); 
+};
+document.getElementById("removeTest").onclick=()=>{ 
+  const d=store.getDay(state.location,state.date); 
+  if(d.tests.length > 1) d.tests.pop(); 
+  store.save(); renderTests(d); 
+};
+
+/* ------- Equipment Issues ------- */
+function equipRowHtml(r={},isNew=false){ 
+  return `<tr>
+    <td><input value="${r.item||""}" data-f="item"></td>
+    <td><input value="${r.eta||""}" data-f="eta"></td>
+    <td><input value="${r.status||""}" data-f="status"></td>
+    <td><input value="${r.notes||""}" data-f="notes"></td>
+    <td>${isNew
+      ? '<button class="btn saveRow">Save</button><button class="btn ghost cancelRow">Cancel</button>'
+      : '<button class="btn ghost deleteRow">Delete</button>'}
+    </td>
+  </tr>`;
+}
+function renderEquipTable(equip){ 
+  document.querySelector("#equipTable tbody").innerHTML=(equip||[]).map(r=>equipRowHtml(r,false)).join(""); 
+}
+document.getElementById("equipAddRow").onclick=()=>{ 
+  document.querySelector("#equipTable tbody").insertAdjacentHTML("beforeend", equipRowHtml({},true)); 
+};
+document.querySelector("#equipTable tbody").addEventListener("click",async e=>{
+  const equip=store.getEquip(state.location);
+  if(e.target.classList.contains("saveRow")){
+    const tr=e.target.closest("tr");
+    const row={}; 
+    [...tr.querySelectorAll("input")].forEach(i=>row[i.dataset.f]=i.value);
+    equip.push(row); 
+    store.save(); 
+    renderEquipTable(equip);
+    await saveEquipToSharePoint({equipment:equip});
+  }
+  if(e.target.classList.contains("cancelRow")) e.target.closest("tr").remove();
+  if(e.target.classList.contains("deleteRow")){
+    const tr=e.target.closest("tr");
+    const idx=[...tr.parentNode.children].indexOf(tr);
+    equip.splice(idx,1); 
+    store.save(); 
+    renderEquipTable(equip);
+    await saveEquipToSharePoint({equipment:equip});
+  }
+});
+
+/* ------- Building Maintenance ------- */
+function buildRowHtml(r={},isNew=false){ 
+  return `<tr>
+    <td><input value="${r.item||""}" data-f="item"></td>
+    <td><input value="${r.eta||""}" data-f="eta"></td>
+    <td><input value="${r.status||""}" data-f="status"></td>
+    <td><input value="${r.notes||""}" data-f="notes"></td>
+    <td>${isNew
+      ? '<button class="btn saveRow">Save</button><button class="btn ghost cancelRow">Cancel</button>'
+      : '<button class="btn ghost deleteRow">Delete</button>'}
+    </td>
+  </tr>`;
+}
+function renderBuildTable(build){ 
+  document.querySelector("#buildTable tbody").innerHTML=(build||[]).map(r=>buildRowHtml(r,false)).join(""); 
+}
+document.getElementById("buildAddRow").onclick=()=>{ 
+  document.querySelector("#buildTable tbody").insertAdjacentHTML("beforeend", buildRowHtml({},true)); 
+};
+document.querySelector("#buildTable tbody").addEventListener("click",async e=>{
+  const build=store.getBuild(state.location);
+  if(e.target.classList.contains("saveRow")){
+    const tr=e.target.closest("tr");
+    const row={}; 
+    [...tr.querySelectorAll("input")].forEach(i=>row[i.dataset.f]=i.value);
+    build.push(row); 
+    store.save(); 
+    renderBuildTable(build);
+    await saveBuildToSharePoint({building:build});
+  }
+  if(e.target.classList.contains("cancelRow")) e.target.closest("tr").remove();
+  if(e.target.classList.contains("deleteRow")){
+    const tr=e.target.closest("tr");
+    const idx=[...tr.parentNode.children].indexOf(tr);
+    build.splice(idx,1); 
+    store.save(); 
+    renderBuildTable(build);
+    await saveBuildToSharePoint({building:build});
+  }
+});
+
+/* ------- Notes / Staffing ------- */
+document.getElementById("notesSave").onclick=()=>{ 
+  const d=store.getDay(state.location,state.date); 
+  d.notes=document.getElementById("notesBox").value; 
+  store.save(); 
+};
+document.getElementById("staffingSave").onclick=()=>{ 
+  const d=store.getDay(state.location,state.date); 
+  d.staffing=document.getElementById("staffingBox").value; 
+  store.save(); 
+};
+
+/* ------- Topbar & render ------- */
+function renderTopbar(d){
+  const sel=document.getElementById("locationSel");
+  sel.innerHTML=LOCS.map(l=>`<option ${l===state.location?"selected":""}>${l}</option>`).join("");
+  document.getElementById("dateSel").value=state.date;
+  document.getElementById("pfcInput").value=d.pfc||"";
+  document.getElementById("todayCount").value=d.todayCount||"";
+  document.getElementById("podsLoc").textContent=`(${state.location})`;
+}
+document.getElementById("locationSel").onchange=e=>{state.location=e.target.value;renderAll();};
+
+document.getElementById("clearLoc").onclick = () => {
+  // Reset all day-specific data for the current location/date
+  const d = store.getDay(state.location, state.date);
+  d.pods = {};
+  d.opener = "";
+  d.zField = "";
+  d.orthoptist = "";
+  d.tests = [{},{},{}];
+  d.notes = "";
+  d.staffing = "";
+  d.pfc = "";
+  d.todayCount = "";
+
+  store.save();
+  renderAll();
+};
+
+
+document.getElementById("dateSel").onchange=e=>{state.date=e.target.value;renderAll();};
+
+/* removed: clearDate handler (no such button in HTML) */
+
+document.getElementById("pfcInput").onchange=()=>{const d=store.getDay(state.location,state.date); d.pfc=document.getElementById("pfcInput").value; store.save();};
+document.getElementById("todayCount").onchange=()=>{const d=store.getDay(state.location,state.date); d.todayCount=document.getElementById("todayCount").value; store.save();};
+
+/* ------- Auto-fit Pods ------- */
+function fitPodsCard(){
+  const podsCard=document.getElementById('podsCard');
+  if(!podsCard) return;
+  const h1=document.querySelector('h1');
+  const topbar=document.querySelector('.topbar');
+  const bcs=getComputedStyle(document.body);
+  const bodyPad=parseInt(bcs.paddingTop||'12')+parseInt(bcs.paddingBottom||'12');
+  const headerH=(h1?h1.getBoundingClientRect().height:0)+(topbar?topbar.getBoundingClientRect().height:0);
+  const blueStrip=10;
+  const available=window.innerHeight - headerH - bodyPad - blueStrip;
+  podsCard.style.maxHeight = available + 'px';
+}
+
+/* ------- Permissions check ------- */
+const allowedEditors=["tmonigold@associatedeyecare.com","sgeary@associatedeyecare.com","jlark@associatedeyecare.com"];
+function applyPermissions(){
+  const account = msalInstance.getAllAccounts()[0];
+  const email = account ? account.username.toLowerCase() : "";
+  const canEdit = allowedEditors.includes(email);
+
+  // Equipment & Building
+  document.getElementById("equipAddRow").style.display=canEdit?"inline-block":"none";
+  document.getElementById("buildAddRow").style.display=canEdit?"inline-block":"none";
+}
+
+/* ------- Main render ------- */
+function renderAll(){
+  const d=store.getDay(state.location,state.date);
+  const equip=store.getEquip(state.location);
+  const build=store.getBuild(state.location);
+  renderTopbar(d);
+  renderPods(d);
+  renderTests(d);
+  renderEquipTable(equip);
+  renderBuildTable(build);
+  document.getElementById("notesBox").value=d.notes;
+  document.getElementById("staffingBox").value=d.staffing;
+  fitPodsCard();
+  applyPermissions();
+}
+
+renderAll();
+window.addEventListener('resize',fitPodsCard);
+setInterval(()=>document.getElementById("now").textContent=new Date().toLocaleString(),1000);
+</script>
+
+</body>
+</html>
