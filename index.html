@@ -830,15 +830,21 @@ setInterval(() => {
   if (nowEl) nowEl.textContent = new Date().toLocaleString();
 }, 1000);
 
-/* ===== Force login on page load ===== */
+/* ===== Force login on page load (silent only) ===== */
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    await ensureLogin();   // trigger login immediately
-    renderAll();           // re-render once logged in (so edit buttons show correctly)
-    console.log("[MSAL] Login completed on page load");
+    // Try to login silently (no popup fallback)
+    await ensureLogin();  
+
+    // Once logged in, pull from SharePoint + render
+    await loadPodsFromSharePoint();
+    renderAll();
+
+    console.log("[MSAL] Silent login completed on page load");
   } catch (err) {
-    console.error("[MSAL] Login failed on page load:", err);
-    // Show a clear message to the user
+    console.error("[MSAL] Silent login failed on page load:", err);
+
+    // Instead of popup, just tell the user to refresh and sign in
     const body = document.querySelector("body");
     if (body) {
       body.innerHTML = `
@@ -853,6 +859,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
+
 
 
 
