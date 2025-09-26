@@ -135,36 +135,78 @@ async function loadFromList(listId, filterTitle) {
 async function savePodsToSharePoint(d) {
   try {
     const token = await getToken();
-    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items`;
 
+    // Look for existing Pods item for this Location + Date
+    const queryUrl =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items?` +
+      `$expand=fields&$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'`;
+
+    const lookupRes = await fetch(queryUrl, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (!lookupRes.ok) {
+      console.error("[SP] Pods lookup failed:", lookupRes.status, await lookupRes.text());
+      return;
+    }
+
+    const lookup = await lookupRes.json();
     const dataJson = JSON.stringify(d.pods);
 
-    // Always create a new item (latest is what matters)
-    const postRes = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        fields: {
+    if (lookup.value && lookup.value.length > 0) {
+      //  Update existing item
+      const itemId = lookup.value[0].id;
+      const patchUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items/${itemId}/fields`;
+
+      const patchRes = await fetch(patchUrl, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
           Title: `${state.location} ${state.date}`,
           Location: state.location,
           Date: state.date,
           DataJson: dataJson
-        }
-      })
-    });
+        })
+      });
 
-    if (!postRes.ok) {
-      console.error("[SP] Pods create failed:", postRes.status, await postRes.text());
+      if (!patchRes.ok) {
+        console.error("[SP] Pods update failed:", patchRes.status, await patchRes.text());
+      } else {
+        console.log("[SP] Pods updated in SharePoint:", state.location, state.date);
+      }
     } else {
-      console.log("[SP] Pods created in SharePoint:", state.location, state.date);
+      //  Create new item
+      const postUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items`;
+      const postRes = await fetch(postUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          fields: {
+            Title: `${state.location} ${state.date}`,
+            Location: state.location,
+            Date: state.date,
+            DataJson: dataJson
+          }
+        })
+      });
+
+      if (!postRes.ok) {
+        console.error("[SP] Pods create failed:", postRes.status, await postRes.text());
+      } else {
+        console.log("[SP] Pods created in SharePoint:", state.location, state.date);
+      }
     }
   } catch (err) {
     console.error("[SP] savePodsToSharePoint threw error:", err);
   }
 }
+
 
 async function saveTestsToSharePoint(d) { await saveToList(testsListId,  `${state.location} ${state.date} - Tests`,     d.tests); }
 async function saveNotesToSharePoint(d) { await saveToList(notesListId,  `${state.location} ${state.date} - Notes`,     d.notes); }
@@ -793,6 +835,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
