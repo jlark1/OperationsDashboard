@@ -135,58 +135,61 @@ async function savePodsToSharePoint(d) {
   try {
     const token = await getToken();
     const title = `${state.location} ${state.date}`;
+    const filter = encodeURIComponent(`fields/Title eq '${title}' and fields/Location eq '${state.location}' and fields/Date eq '${state.date}'`);
+    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items?$expand=fields&$filter=${filter}`;
 
-    // Step 1: Try to find existing item for this Location + Date
-    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items?$expand=fields&$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&$top=1`;
+    // 1. Check if item already exists
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    const existing = data.value && data.value[0];
 
-    const json = await res.json();
-    const fields = { Title: title, Location: state.location, Date: state.date, DataJson: JSON.stringify(d.pods) };
+    const itemBody = {
+      fields: {
+        Title: title,
+        Location: state.location,
+        Date: state.date,
+        DataJson: JSON.stringify(d.pods)
+      }
+    };
 
-    if (json.value && json.value.length > 0) {
-      // Step 2: Update existing item, include @odata.etag
-      const item = json.value[0];
-      const etag = item["@odata.etag"];
-
-      const patchRes = await fetch(
-        `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items/${item.id}/fields`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-            "If-Match": etag   // <<< this fixes the 409 conflict
-          },
-          body: JSON.stringify(fields)
-        }
-      );
-
-      if (!patchRes.ok) throw new Error(await patchRes.text());
-      console.log("[SP] Pods updated in SharePoint:", title);
+    if (existing) {
+      // 2. Update existing with force overwrite
+      const patchUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items/${existing.id}`;
+      const patchRes = await fetch(patchUrl, {
+        method: "PATCH",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "If-Match": "*"   // force overwrite
+        },
+        body: JSON.stringify(itemBody)
+      });
+      if (!patchRes.ok) {
+        console.error("[SP] Pods update failed:", await patchRes.text());
+      } else {
+        console.log("[SP] Pods updated in SharePoint:", title);
+      }
     } else {
-      // Step 3: Create new if none exists
-      const postRes = await fetch(
-        `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ fields })
-        }
-      );
-      if (!postRes.ok) throw new Error(await postRes.text());
-      console.log("[SP] Pods created in SharePoint:", title);
+      // 3. Insert new
+      const postUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items`;
+      const postRes = await fetch(postUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(itemBody)
+      });
+      if (!postRes.ok) {
+        console.error("[SP] Pods create failed:", await postRes.text());
+      } else {
+        console.log("[SP] Pods created in SharePoint:", title);
+      }
     }
   } catch (err) {
-    console.error("[SP] Pods save failed:", err);
+    console.error("[SP] Pods save threw error:", err);
   }
 }
-
-
-
 async function saveTestsToSharePoint(d) { await saveToList(testsListId,  `${state.location} ${state.date} - Tests`,     d.tests); }
 async function saveNotesToSharePoint(d) { await saveToList(notesListId,  `${state.location} ${state.date} - Notes`,     d.notes); }
 async function saveStaffingToSharePoint(d){ await saveToList(staffingListId, `${state.location} ${state.date} - Staffing`, d.staffing); }
@@ -848,6 +851,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
