@@ -536,42 +536,31 @@ document.getElementById("savePods").onclick=async ()=>{
   try { await savePodsToSharePoint(d); } catch(err) { console.error("[SP] Save pods failed:", err); }
 };
 
-/* ===== Pods Loader (from SharePoint) ===== */
+/* ===== Pods Loader ===== */
 async function loadPodsFromSharePoint() {
   try {
     const token = await getToken();
+    const filter = encodeURIComponent(`fields/Location eq '${state.location}' and fields/Date eq '${state.date}'`);
     const url =
       `https://graph.microsoft.com/v1.0/sites/${siteId}` +
-      `/lists/${podsListId}/items?` +
-      `$expand=fields($select=Title,Location,Date,DataJson)` +
-      `&$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'` +
-      `&$orderby=createdDateTime desc&$top=1`;
+      `/lists/${podsListId}/items?$expand=fields&$filter=${filter}`;
 
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
       console.error("[SP] Pods load failed:", res.status, await res.text());
       return;
     }
-
     const json = await res.json();
     if (!json.value || json.value.length === 0) {
       console.log("[SP] No Pods item found for", state.location, state.date);
       return;
     }
-
     const fields = json.value[0].fields || {};
-    let parsed = {};
-    try {
-      parsed = fields.DataJson ? JSON.parse(fields.DataJson) : {};
-    } catch (e) {
-      console.warn("[SP] Pods DataJson parse error:", e);
-      parsed = {};
-    }
+    let parsed={};
+    try { parsed = fields.DataJson ? JSON.parse(fields.DataJson) : {}; }
+    catch(e){ console.warn("[SP] Pods DataJson parse error:", e); parsed={}; }
 
-    const d = store.getDay(state.location, state.date);
+    const d = store.getDay(state.location,state.date);
     d.pods = parsed;
     store.save();
     renderPods(d);
@@ -580,7 +569,7 @@ async function loadPodsFromSharePoint() {
     console.error("[SP] Pods load threw error:", err);
   }
 }
-  
+
 document.getElementById("clearPods").onclick=()=>{
   const d=store.getDay(state.location,state.date);
   d.pods={}; d.opener=""; d.zField=""; d.orthoptist="";
@@ -600,7 +589,7 @@ function renderTests(d){
     cont.appendChild(input); 
   }); 
 }
-document.getElementById("saveTest").onclick=async ()=>{ 
+document.getElementById("saveTest").onclick=async()=>{ 
   const d=store.getDay(state.location,state.date); 
   d.tests=[...document.querySelectorAll("#testingFields input")].map(x=>({name:x.value})); 
   store.save(); 
@@ -616,6 +605,40 @@ document.getElementById("removeTest").onclick=()=>{
   if(d.tests.length > 1) d.tests.pop(); 
   store.save(); renderTests(d); 
 };
+
+/* ===== Special Testing Loader ===== */
+async function loadTestsFromSharePoint() {
+  try {
+    const token = await getToken();
+    const filter = encodeURIComponent(`fields/Location eq '${state.location}' and fields/Date eq '${state.date}'`);
+    const url =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
+      `/lists/${testsListId}/items?$expand=fields&$filter=${filter}`;
+
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      console.error("[SP] Tests load failed:", res.status, await res.text());
+      return;
+    }
+    const json = await res.json();
+    if (!json.value || json.value.length === 0) {
+      console.log("[SP] No Tests found for", state.location, state.date);
+      return;
+    }
+    const fields = json.value[0].fields || {};
+    let parsed=[];
+    try { parsed = fields.DataJson ? JSON.parse(fields.DataJson) : []; }
+    catch(e){ console.warn("[SP] Tests DataJson parse error:", e); parsed=[]; }
+
+    const d = store.getDay(state.location,state.date);
+    d.tests = parsed;
+    store.save();
+    renderTests(d);
+    console.log("[SP] Tests loaded from SharePoint for", state.location, state.date, parsed);
+  } catch (err) {
+    console.error("[SP] Tests load threw error:", err);
+  }
+}
 
 /* ------- Equipment Issues ------- */
 function equipRowHtml(r={},isNew=false){ 
@@ -723,7 +746,6 @@ function renderTopbar(d){
 document.getElementById("locationSel").onchange=e=>{state.location=e.target.value;renderAll();};
 
 document.getElementById("clearLoc").onclick = () => {
-  // Reset all day-specific data for the current location/date
   const d = store.getDay(state.location, state.date);
   d.pods = {};
   d.opener = "";
@@ -734,7 +756,6 @@ document.getElementById("clearLoc").onclick = () => {
   d.staffing = "";
   d.pfc = "";
   d.todayCount = "";
-
   store.save();
   renderAll();
 };
@@ -764,8 +785,6 @@ function applyPermissions(){
   const account = msalInstance.getAllAccounts()[0];
   const email = account ? account.username.toLowerCase() : "";
   const canEdit = allowedEditors.includes(email);
-
-  // Equipment & Building
   document.getElementById("equipAddRow").style.display=canEdit?"inline-block":"none";
   document.getElementById("buildAddRow").style.display=canEdit?"inline-block":"none";
 }
@@ -802,6 +821,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     await ensureLogin();
     renderAll();
     await loadPodsFromSharePoint();
+    await loadTestsFromSharePoint();
     console.log("[MSAL] Login completed on page load");
   } catch (err) {
     console.error("[MSAL] Login failed on page load:", err);
@@ -817,10 +837,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 });
 </script>
-
-
 </body>
 </html>
+
 
 
 
