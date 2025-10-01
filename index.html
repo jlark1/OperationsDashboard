@@ -763,14 +763,20 @@ async function loadTestsFromSharePoint() {
     console.error("[SP] Tests load threw error:", err);
   }
 }
-// ===== Load Important Information/Overbooks =====
+/* ===== Notes (Important Information/Overbooks) Loader ===== */
 async function loadNotesFromSharePoint() {
   try {
     const token = await getToken();
+    const loc = state.location;
+    const dt  = state.date;
+
+    // Pull the most recent item for this Location + Date
     const url =
-      `${graphBase}/lists/${notesListId}/items?` +
-      `$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&` +
-      `$orderby=createdDateTime desc&$top=1`;
+      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
+      `/lists/${notesListId}/items` +
+      `?$expand=fields($select=Title,Location,Date,DataJson)` +
+      `&$filter=fields/Location eq '${loc}' and fields/Date eq '${dt}'` +
+      `&$orderby=lastModifiedDateTime desc&$top=1`;
 
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
@@ -778,25 +784,48 @@ async function loadNotesFromSharePoint() {
       return;
     }
 
-    const json = await res.json();
-    if (json.value && json.value.length > 0) {
-      const notesValue = json.value[0].fields.Notes || "";
-      const notesBox = document.getElementById("notesBox");
-      if (notesBox) notesBox.value = notesValue;
-      console.log("[SP] Notes loaded from SharePoint:", notesValue);
+    const data = await res.json();
+    let text = "";
+    if (data.value && data.value.length) {
+      const fields = data.value[0].fields || {};
+      // We stored the value in DataJson via saveToList(...)
+      try {
+        const parsed = fields.DataJson ? JSON.parse(fields.DataJson) : "";
+        text = typeof parsed === "string" ? parsed : "";
+      } catch {
+        // If someone saved raw text (older item), just use it
+        text = fields.DataJson || "";
+      }
     }
+
+    const el = document.getElementById("notesBox");
+    if (el) el.value = text;
+
+    // Mirror to local store for UI consistency
+    const d = store.getDay(state.location, state.date);
+    d.notes = text;
+    store.save();
+
+    console.log("[SP] Notes loaded from SharePoint for", loc, dt, { text });
   } catch (err) {
-    console.error("[SP] Notes load error:", err);
+    console.error("[SP] Notes load threw error:", err);
   }
 }
-// ===== Load Staffing =====
+
+
+/* ===== Staffing Impacts Loader ===== */
 async function loadStaffingFromSharePoint() {
   try {
     const token = await getToken();
+    const loc = state.location;
+    const dt  = state.date;
+
     const url =
-      `${graphBase}/lists/${staffingListId}/items?` +
-      `$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&` +
-      `$orderby=createdDateTime desc&$top=1`;
+      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
+      `/lists/${staffingListId}/items` +
+      `?$expand=fields($select=Title,Location,Date,DataJson)` +
+      `&$filter=fields/Location eq '${loc}' and fields/Date eq '${dt}'` +
+      `&$orderby=lastModifiedDateTime desc&$top=1`;
 
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
@@ -804,15 +833,28 @@ async function loadStaffingFromSharePoint() {
       return;
     }
 
-    const json = await res.json();
-    if (json.value && json.value.length > 0) {
-      const staffingValue = json.value[0].fields.Staffing || "";
-      const staffingBox = document.getElementById("staffingBox");
-      if (staffingBox) staffingBox.value = staffingValue;
-      console.log("[SP] Staffing loaded from SharePoint:", staffingValue);
+    const data = await res.json();
+    let text = "";
+    if (data.value && data.value.length) {
+      const fields = data.value[0].fields || {};
+      try {
+        const parsed = fields.DataJson ? JSON.parse(fields.DataJson) : "";
+        text = typeof parsed === "string" ? parsed : "";
+      } catch {
+        text = fields.DataJson || "";
+      }
     }
+
+    const el = document.getElementById("staffingBox");
+    if (el) el.value = text;
+
+    const d = store.getDay(state.location, state.date);
+    d.staffing = text;
+    store.save();
+
+    console.log("[SP] Staffing loaded from SharePoint for", loc, dt, { text });
   } catch (err) {
-    console.error("[SP] Staffing load error:", err);
+    console.error("[SP] Staffing load threw error:", err);
   }
 }
 
@@ -1017,6 +1059,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
