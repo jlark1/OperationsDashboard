@@ -278,81 +278,122 @@ async function saveTestsToSharePoint(d) {
     console.error("[SP] Tests save threw error:", err);
   }
 }
-// ===== Save Important Information/Overbooks =====
-async function saveNotesToSharePoint() {
-    const location = document.getElementById("locationSelect").value;
-    const date = document.getElementById("datePicker").value;
-    const notes = document.getElementById("notesBox").value;
-
-    try {
-        const response = await fetch(`${graphBase}/lists/${listId}/items`, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/json",
-                "Prefer": "HonorNonIndexedQueriesWarningMayFailRandomly"
-            },
-            body: JSON.stringify({
-                fields: {
-                    Title: `Notes_${location}_${date}`,
-                    Location: location,
-                    Date: date,
-                    Notes: notes
-                }
-            })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error("[SP] Notes save failed:", errorData);
-            return;
-        }
-
-        console.log(`[SP] Notes saved to SharePoint for ${location} ${date}`);
-    } catch (err) {
-        console.error("[SP] Notes save error:", err);
+/* ===== Save Notes (Important Information/Overbooks) ===== */
+async function saveNotesToSharePoint(d) {
+  const payload = {
+    fields: {
+      Title: `${state.location} ${state.date} - Notes`,
+      Location: state.location,
+      Date: state.date,
+      DataJson: JSON.stringify(d.notes || "")
     }
+  };
+
+  try {
+    const token = await getToken();
+    const findUrl =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${notesListId}/items?` +
+      `$select=id&$expand=fields($select=Location,Date)&` +
+      `$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&$top=1`;
+
+    const findRes = await fetch(findUrl, { headers: { Authorization: `Bearer ${token}` } });
+
+    let method = "POST";
+    let target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${notesListId}/items`;
+
+    if (findRes.ok) {
+      const found = await findRes.json();
+      if (found.value && found.value.length) {
+        method = "PATCH";
+        target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${notesListId}/items/${found.value[0].id}/fields`;
+      }
+    }
+
+    const res = await fetch(target, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: method === "PATCH" ? JSON.stringify(payload.fields) : JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      console.error("[SP] Notes save failed:", res.status, await res.text());
+    } else {
+      console.log("[SP] Notes saved to SharePoint for", state.location, state.date);
+    }
+  } catch (e) {
+    console.error("[SP] Notes save threw:", e);
+  }
 }
 
-// ===== Save Staffing Impacts =====
-async function saveStaffingToSharePoint() {
-    const location = document.getElementById("locationSelect").value;
-    const date = document.getElementById("datePicker").value;
-    const staffing = document.getElementById("staffingBox").value;
-
-    try {
-        const response = await fetch(`${graphBase}/lists/${listId}/items`, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/json",
-                "Prefer": "HonorNonIndexedQueriesWarningMayFailRandomly"
-            },
-            body: JSON.stringify({
-                fields: {
-                    Title: `Staffing_${location}_${date}`,
-                    Location: location,
-                    Date: date,
-                    Staffing: staffing
-                }
-            })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error("[SP] Staffing save failed:", errorData);
-            return;
-        }
-
-        console.log(`[SP] Staffing saved to SharePoint for ${location} ${date}`);
-    } catch (err) {
-        console.error("[SP] Staffing save error:", err);
+/* ===== Save Staffing ===== */
+async function saveStaffingToSharePoint(d) {
+  const payload = {
+    fields: {
+      Title: `${state.location} ${state.date} - Staffing`,
+      Location: state.location,
+      Date: state.date,
+      DataJson: JSON.stringify(d.staffing || "")
     }
+  };
+
+  try {
+    const token = await getToken();
+    const findUrl =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${staffingListId}/items?` +
+      `$select=id&$expand=fields($select=Location,Date)&` +
+      `$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&$top=1`;
+
+    const findRes = await fetch(findUrl, { headers: { Authorization: `Bearer ${token}` } });
+
+    let method = "POST";
+    let target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${staffingListId}/items`;
+
+    if (findRes.ok) {
+      const found = await findRes.json();
+      if (found.value && found.value.length) {
+        method = "PATCH";
+        target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${staffingListId}/items/${found.value[0].id}/fields`;
+      }
+    }
+
+    const res = await fetch(target, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: method === "PATCH" ? JSON.stringify(payload.fields) : JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      console.error("[SP] Staffing save failed:", res.status, await res.text());
+    } else {
+      console.log("[SP] Staffing saved to SharePoint for", state.location, state.date);
+    }
+  } catch (e) {
+    console.error("[SP] Staffing save threw:", e);
+  }
 }
+
 
 // Attach button handlers
-document.getElementById("notesSave").addEventListener("click", saveNotesToSharePoint);
-document.getElementById("staffingSave").addEventListener("click", saveStaffingToSharePoint);
+document.getElementById("notesSave")?.addEventListener("click", async () => {
+  const d = store.getDay(state.location, state.date);
+  d.notes = document.getElementById("notesBox").value;
+  store.save();
+  await saveNotesToSharePoint(d);
+});
+
+document.getElementById("staffingSave")?.addEventListener("click", async () => {
+  const d = store.getDay(state.location, state.date);
+  d.staffing = document.getElementById("staffingBox").value;
+  store.save();
+  await saveStaffingToSharePoint(d);
+});
+
 
 async function savePfcToSharePoint(d) {
   await saveSimpleToList(pfcListId, `${state.location} ${state.date} - PFC`, "PFC", d.pfc);
@@ -796,20 +837,13 @@ async function loadTestsFromSharePoint() {
     console.error("[SP] Tests load threw error:", err);
   }
 }
-/* ===== Notes (Important Information/Overbooks) Loader ===== */
+/* ===== Notes Loader ===== */
 async function loadNotesFromSharePoint() {
   try {
     const token = await getToken();
-    const loc = state.location;
-    const dt  = state.date;
-
-    // Pull the most recent item for this Location + Date
     const url =
-      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
-      `/lists/${notesListId}/items` +
-      `?$expand=fields($select=Title,Location,Date,DataJson)` +
-      `&$filter=fields/Location eq '${loc}' and fields/Date eq '${dt}'` +
-      `&$orderby=lastModifiedDateTime desc&$top=1`;
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${notesListId}/items?` +
+      `$expand=fields&$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&$top=1`;
 
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
@@ -817,48 +851,27 @@ async function loadNotesFromSharePoint() {
       return;
     }
 
-    const data = await res.json();
-    let text = "";
-    if (data.value && data.value.length) {
-      const fields = data.value[0].fields || {};
-      // We stored the value in DataJson via saveToList(...)
-      try {
-        const parsed = fields.DataJson ? JSON.parse(fields.DataJson) : "";
-        text = typeof parsed === "string" ? parsed : "";
-      } catch {
-        // If someone saved raw text (older item), just use it
-        text = fields.DataJson || "";
-      }
+    const json = await res.json();
+    if (json.value && json.value.length > 0) {
+      const fields = json.value[0].fields;
+      const d = store.getDay(state.location, state.date);
+      d.notes = fields.DataJson ? JSON.parse(fields.DataJson) : "";
+      store.save();
+      document.getElementById("notesBox").value = d.notes;
+      console.log("[SP] Notes loaded from SharePoint:", d.notes);
     }
-
-    const el = document.getElementById("notesBox");
-    if (el) el.value = text;
-
-    // Mirror to local store for UI consistency
-    const d = store.getDay(state.location, state.date);
-    d.notes = text;
-    store.save();
-
-    console.log("[SP] Notes loaded from SharePoint for", loc, dt, { text });
   } catch (err) {
-    console.error("[SP] Notes load threw error:", err);
+    console.error("[SP] Notes load threw:", err);
   }
 }
 
-
-/* ===== Staffing Impacts Loader ===== */
+/* ===== Staffing Loader ===== */
 async function loadStaffingFromSharePoint() {
   try {
     const token = await getToken();
-    const loc = state.location;
-    const dt  = state.date;
-
     const url =
-      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
-      `/lists/${staffingListId}/items` +
-      `?$expand=fields($select=Title,Location,Date,DataJson)` +
-      `&$filter=fields/Location eq '${loc}' and fields/Date eq '${dt}'` +
-      `&$orderby=lastModifiedDateTime desc&$top=1`;
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${staffingListId}/items?` +
+      `$expand=fields&$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&$top=1`;
 
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
@@ -866,28 +879,17 @@ async function loadStaffingFromSharePoint() {
       return;
     }
 
-    const data = await res.json();
-    let text = "";
-    if (data.value && data.value.length) {
-      const fields = data.value[0].fields || {};
-      try {
-        const parsed = fields.DataJson ? JSON.parse(fields.DataJson) : "";
-        text = typeof parsed === "string" ? parsed : "";
-      } catch {
-        text = fields.DataJson || "";
-      }
+    const json = await res.json();
+    if (json.value && json.value.length > 0) {
+      const fields = json.value[0].fields;
+      const d = store.getDay(state.location, state.date);
+      d.staffing = fields.DataJson ? JSON.parse(fields.DataJson) : "";
+      store.save();
+      document.getElementById("staffingBox").value = d.staffing;
+      console.log("[SP] Staffing loaded from SharePoint:", d.staffing);
     }
-
-    const el = document.getElementById("staffingBox");
-    if (el) el.value = text;
-
-    const d = store.getDay(state.location, state.date);
-    d.staffing = text;
-    store.save();
-
-    console.log("[SP] Staffing loaded from SharePoint for", loc, dt, { text });
   } catch (err) {
-    console.error("[SP] Staffing load threw error:", err);
+    console.error("[SP] Staffing load threw:", err);
   }
 }
 
@@ -1092,6 +1094,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
