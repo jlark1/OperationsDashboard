@@ -256,8 +256,82 @@ async function saveTestsToSharePoint(d) {
     console.error("[SP] Tests save threw:", e);
   }
 }
-async function saveNotesToSharePoint(d) { await saveToList(notesListId,  `${state.location} ${state.date} - Notes`,     d.notes); }
-async function saveStaffingToSharePoint(d){ await saveToList(staffingListId, `${state.location} ${state.date} - Staffing`, d.staffing); }
+// ===== Save Important Information/Overbooks =====
+async function saveNotesToSharePoint() {
+    const location = document.getElementById("locationSelect").value;
+    const date = document.getElementById("datePicker").value;
+    const notes = document.getElementById("notesBox").value;
+
+    try {
+        const response = await fetch(`${graphBase}/lists/${listId}/items`, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+                "Prefer": "HonorNonIndexedQueriesWarningMayFailRandomly"
+            },
+            body: JSON.stringify({
+                fields: {
+                    Title: `Notes_${location}_${date}`,
+                    Location: location,
+                    Date: date,
+                    Notes: notes
+                }
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error("[SP] Notes save failed:", errorData);
+            return;
+        }
+
+        console.log(`[SP] Notes saved to SharePoint for ${location} ${date}`);
+    } catch (err) {
+        console.error("[SP] Notes save error:", err);
+    }
+}
+
+// ===== Save Staffing Impacts =====
+async function saveStaffingToSharePoint() {
+    const location = document.getElementById("locationSelect").value;
+    const date = document.getElementById("datePicker").value;
+    const staffing = document.getElementById("staffingBox").value;
+
+    try {
+        const response = await fetch(`${graphBase}/lists/${listId}/items`, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+                "Prefer": "HonorNonIndexedQueriesWarningMayFailRandomly"
+            },
+            body: JSON.stringify({
+                fields: {
+                    Title: `Staffing_${location}_${date}`,
+                    Location: location,
+                    Date: date,
+                    Staffing: staffing
+                }
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error("[SP] Staffing save failed:", errorData);
+            return;
+        }
+
+        console.log(`[SP] Staffing saved to SharePoint for ${location} ${date}`);
+    } catch (err) {
+        console.error("[SP] Staffing save error:", err);
+    }
+}
+
+// Attach button handlers
+document.getElementById("notesSave").addEventListener("click", saveNotesToSharePoint);
+document.getElementById("staffingSave").addEventListener("click", saveStaffingToSharePoint);
+
 async function savePfcToSharePoint(d) {
   await saveSimpleToList(pfcListId, `${state.location} ${state.date} - PFC`, "PFC", d.pfc);
   console.log("PFC saved to SharePoint:", d.pfc);
@@ -466,7 +540,7 @@ td input {
 
     <!-- Notes & Staffing -->
     <div class="card notes-card">
-      <div class="section-title"><h2>Important Information</h2><button id="notesSave" class="btn">Save</button></div>
+      <div class="section-title"><h2>Important Information/Overbooks</h2><button id="notesSave" class="btn">Save</button></div>
       <textarea id="notesBox"></textarea>
     </div>
     <div class="card staffing-card">
@@ -689,6 +763,64 @@ async function loadTestsFromSharePoint() {
     console.error("[SP] Tests load threw error:", err);
   }
 }
+// ===== Load Important Information/Overbooks =====
+async function loadNotesFromSharePoint() {
+    const location = document.getElementById("locationSelect").value;
+    const date = document.getElementById("datePicker").value;
+
+    try {
+        const response = await fetch(`${graphBase}/lists/${listId}/items?$filter=fields/Title eq 'Notes_${location}_${date}'`, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error("[SP] Notes load failed:", errorData);
+            return;
+        }
+
+        const data = await response.json();
+        if (data.value && data.value.length > 0) {
+            document.getElementById("notesBox").value = data.value[0].fields.Notes || "";
+        } else {
+            document.getElementById("notesBox").value = "";
+        }
+
+        console.log(`[SP] Notes loaded from SharePoint for ${location} ${date}`);
+    } catch (err) {
+        console.error("[SP] Notes load error:", err);
+    }
+}
+
+// ===== Load Staffing Impacts =====
+async function loadStaffingFromSharePoint() {
+    const location = document.getElementById("locationSelect").value;
+    const date = document.getElementById("datePicker").value;
+
+    try {
+        const response = await fetch(`${graphBase}/lists/${listId}/items?$filter=fields/Title eq 'Staffing_${location}_${date}'`, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error("[SP] Staffing load failed:", errorData);
+            return;
+        }
+
+        const data = await response.json();
+        if (data.value && data.value.length > 0) {
+            document.getElementById("staffingBox").value = data.value[0].fields.Staffing || "";
+        } else {
+            document.getElementById("staffingBox").value = "";
+        }
+
+        console.log(`[SP] Staffing loaded from SharePoint for ${location} ${date}`);
+    } catch (err) {
+        console.error("[SP] Staffing load error:", err);
+    }
+}
+
 
 /* ------- Equipment Issues ------- */
 function equipRowHtml(r={},isNew=false){ 
@@ -872,6 +1004,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderAll();
     await loadPodsFromSharePoint();
     await loadTestsFromSharePoint();
+    await loadNotesFromSharePoint();
+    await loadStaffingFromSharePoint();
     console.log("[MSAL] Login completed on page load");
   } catch (err) {
     console.error("[MSAL] Login failed on page load:", err);
@@ -889,6 +1023,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
