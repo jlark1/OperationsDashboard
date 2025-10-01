@@ -204,14 +204,14 @@ async function savePodsToSharePoint(d) {
     console.error("[SP] Pods save threw error:", err);
   }
 }
-/* ===== Tests Save (Upsert by Location + Date) ===== */
+/* ===== Save Tests to SharePoint (Upsert by Location + Date) ===== */
 async function saveTestsToSharePoint(d) {
   try {
     const token = await getToken();
     const loc = state.location;
     const day = state.date;
 
-    // 1. Try to find an existing Tests item for this location/date
+    // 1. Look for an existing Tests item for this location/date
     const findUrl =
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items?` +
       `$expand=fields&$filter=fields/Location eq '${loc}' and fields/Date eq '${day}'&$top=1`;
@@ -228,7 +228,7 @@ async function saveTestsToSharePoint(d) {
     const findJson = await findRes.json();
     const existing = (findJson.value && findJson.value.length > 0) ? findJson.value[0] : null;
 
-    // Data payload
+    // 2. Prepare payload
     const item = {
       fields: {
         Title: `${loc} ${day} - Tests`,
@@ -239,14 +239,14 @@ async function saveTestsToSharePoint(d) {
     };
 
     if (existing) {
-      // 2a. Update existing
+      // 3a. Update existing
       const updateUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items/${existing.id}/fields`;
       const updateRes = await fetch(updateUrl, {
         method: "PATCH",
         headers: {
           "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json",
-          "If-Match": "*"
+          "If-Match": "*"   // <— important to prevent 412 Precondition Failed
         },
         body: JSON.stringify(item.fields)
       });
@@ -257,7 +257,7 @@ async function saveTestsToSharePoint(d) {
         console.log("[SP] Tests updated in SharePoint:", loc, day);
       }
     } else {
-      // 2b. Create new
+      // 3b. Create new
       const createUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items`;
       const createRes = await fetch(createUrl, {
         method: "POST",
@@ -278,6 +278,7 @@ async function saveTestsToSharePoint(d) {
     console.error("[SP] Tests save threw error:", err);
   }
 }
+
 /* ===== Save Notes (Important Information/Overbooks) ===== */
 async function saveNotesToSharePoint(d) {
   const payload = {
@@ -1096,6 +1097,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
