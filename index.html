@@ -765,59 +765,56 @@ async function loadTestsFromSharePoint() {
 }
 // ===== Load Important Information/Overbooks =====
 async function loadNotesFromSharePoint() {
-    try {
-        const location = document.getElementById("locationSelect").value;
-        const date = document.getElementById("datePicker").value;
+  try {
+    const token = await getToken();
+    const url =
+      `${graphBase}/lists/${notesListId}/items?` +
+      `$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&` +
+      `$orderby=createdDateTime desc&$top=1`;
 
-        const response = await fetch(`${graphBase}/lists/${listId}/items?$filter=startswith(Title,'Notes_${location}_${date}')`, {
-            headers: { Authorization: `Bearer ${accessToken}` }
-        });
-
-        if (!response.ok) {
-            console.error("[SP] Notes load failed:", await response.text());
-            return;
-        }
-
-        const data = await response.json();
-        console.log("[SP] Notes loaded from SharePoint:", data);
-
-        const notesBox = document.getElementById("notesBox");
-        if (notesBox && data.value.length > 0) {
-            notesBox.value = data.value[0].fields.Notes || "";
-        }
-    } catch (err) {
-        console.error("[SP] Notes load error:", err);
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      console.error("[SP] Notes load failed:", res.status, await res.text());
+      return;
     }
-}
 
-// ===== Load Staffing Impacts =====
+    const json = await res.json();
+    if (json.value && json.value.length > 0) {
+      const notesValue = json.value[0].fields.Notes || "";
+      const notesBox = document.getElementById("notesBox");
+      if (notesBox) notesBox.value = notesValue;
+      console.log("[SP] Notes loaded from SharePoint:", notesValue);
+    }
+  } catch (err) {
+    console.error("[SP] Notes load error:", err);
+  }
+}
+// ===== Load Staffing =====
 async function loadStaffingFromSharePoint() {
-    try {
-        const location = document.getElementById("locationSelect").value;
-        const date = document.getElementById("datePicker").value;
+  try {
+    const token = await getToken();
+    const url =
+      `${graphBase}/lists/${staffingListId}/items?` +
+      `$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&` +
+      `$orderby=createdDateTime desc&$top=1`;
 
-        const response = await fetch(`${graphBase}/lists/${listId}/items?$filter=startswith(Title,'Staffing_${location}_${date}')`, {
-            headers: { Authorization: `Bearer ${accessToken}` }
-        });
-
-        if (!response.ok) {
-            console.error("[SP] Staffing load failed:", await response.text());
-            return;
-        }
-
-        const data = await response.json();
-        console.log("[SP] Staffing loaded from SharePoint:", data);
-
-        const staffingBox = document.getElementById("staffingBox");
-        if (staffingBox && data.value.length > 0) {
-            staffingBox.value = data.value[0].fields.Staffing || "";
-        }
-    } catch (err) {
-        console.error("[SP] Staffing load error:", err);
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      console.error("[SP] Staffing load failed:", res.status, await res.text());
+      return;
     }
+
+    const json = await res.json();
+    if (json.value && json.value.length > 0) {
+      const staffingValue = json.value[0].fields.Staffing || "";
+      const staffingBox = document.getElementById("staffingBox");
+      if (staffingBox) staffingBox.value = staffingValue;
+      console.log("[SP] Staffing loaded from SharePoint:", staffingValue);
+    }
+  } catch (err) {
+    console.error("[SP] Staffing load error:", err);
+  }
 }
-
-
 
 /* ------- Equipment Issues ------- */
 function equipRowHtml(r={},isNew=false){ 
@@ -1020,6 +1017,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
