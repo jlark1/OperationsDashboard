@@ -839,6 +839,7 @@ async function loadTestsFromSharePoint() {
 }
 /* ===== Notes Loader ===== */
 async function loadNotesFromSharePoint() {
+  console.log("[SP] loadNotesFromSharePoint called");
   try {
     const token = await getToken();
     const url =
@@ -867,6 +868,7 @@ async function loadNotesFromSharePoint() {
 
 /* ===== Staffing Loader ===== */
 async function loadStaffingFromSharePoint() {
+  console.log("[SP] loadStaffingFromSharePoint called");
   try {
     const token = await getToken();
     const url =
@@ -1094,6 +1096,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
