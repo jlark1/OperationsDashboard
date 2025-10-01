@@ -204,56 +204,78 @@ async function savePodsToSharePoint(d) {
     console.error("[SP] Pods save threw error:", err);
   }
 }
-/* ===== Save Tests to SharePoint ====== */
+/* ===== Tests Save (Upsert by Location + Date) ===== */
 async function saveTestsToSharePoint(d) {
-  const payload = {
-    fields: {
-      Title: `${state.location} ${state.date} - Tests`,
-      Location: state.location,
-      Date: state.date,
-      DataJson: JSON.stringify(d.tests || [])
-    }
-  };
-
   try {
     const token = await getToken();
+    const loc = state.location;
+    const day = state.date;
 
-    // Find existing item for (Location, Date)
+    // 1. Try to find an existing Tests item for this location/date
     const findUrl =
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items?` +
-      `$select=id&$expand=fields($select=Location,Date)&` +
-      `$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&$top=1`;
+      `$expand=fields&$filter=fields/Location eq '${loc}' and fields/Date eq '${day}'&$top=1`;
 
-    const findRes = await fetch(findUrl, { headers: { Authorization: `Bearer ${token}` } });
-
-    let method = "POST";
-    let target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items`;
-
-    if (findRes.ok) {
-      const found = await findRes.json();
-      if (found.value && found.value.length) {
-        // Upsert: PATCH existing fields
-        method = "PATCH";
-        target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items/${found.value[0].id}/fields`;
-      }
-    }
-
-    const res = await fetch(target, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: method === "PATCH" ? JSON.stringify(payload.fields) : JSON.stringify(payload)
+    const findRes = await fetch(findUrl, {
+      headers: { Authorization: `Bearer ${token}` }
     });
 
-    if (!res.ok) {
-      console.error("[SP] Tests save failed:", res.status, await res.text());
-    } else {
-      console.log("[SP] Tests saved to SharePoint for", state.location, state.date);
+    if (!findRes.ok) {
+      console.error("[SP] Tests lookup failed:", findRes.status, await findRes.text());
+      return;
     }
-  } catch (e) {
-    console.error("[SP] Tests save threw:", e);
+
+    const findJson = await findRes.json();
+    const existing = (findJson.value && findJson.value.length > 0) ? findJson.value[0] : null;
+
+    // Data payload
+    const item = {
+      fields: {
+        Title: `${loc} ${day} - Tests`,
+        Location: loc,
+        Date: day,
+        DataJson: JSON.stringify(d.tests || [])
+      }
+    };
+
+    if (existing) {
+      // 2a. Update existing
+      const updateUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items/${existing.id}/fields`;
+      const updateRes = await fetch(updateUrl, {
+        method: "PATCH",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "If-Match": "*"
+        },
+        body: JSON.stringify(item.fields)
+      });
+
+      if (!updateRes.ok) {
+        console.error("[SP] Tests update failed:", updateRes.status, await updateRes.text());
+      } else {
+        console.log("[SP] Tests updated in SharePoint:", loc, day);
+      }
+    } else {
+      // 2b. Create new
+      const createUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items`;
+      const createRes = await fetch(createUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(item)
+      });
+
+      if (!createRes.ok) {
+        console.error("[SP] Tests create failed:", createRes.status, await createRes.text());
+      } else {
+        console.log("[SP] Tests created in SharePoint:", loc, day);
+      }
+    }
+  } catch (err) {
+    console.error("[SP] Tests save threw error:", err);
   }
 }
 // ===== Save Important Information/Overbooks =====
@@ -730,35 +752,46 @@ document.getElementById("removeTest").onclick=()=>{
   store.save(); renderTests(d); 
 };
 
-/* ===== Special Testing Loader ===== */
+/* ===== Tests Load (By Location + Date) ===== */
 async function loadTestsFromSharePoint() {
   try {
     const token = await getToken();
-    const filter = encodeURIComponent(`fields/Location eq '${state.location}' and fields/Date eq '${state.date}'`);
-    const url =
-      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
-      `/lists/${testsListId}/items?$expand=fields&$filter=${filter}`;
+    const loc = state.location;
+    const day = state.date;
 
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const url =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items?` +
+      `$expand=fields&$filter=fields/Location eq '${loc}' and fields/Date eq '${day}'&$top=1`;
+
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
     if (!res.ok) {
       console.error("[SP] Tests load failed:", res.status, await res.text());
       return;
     }
+
     const json = await res.json();
     if (!json.value || json.value.length === 0) {
-      console.log("[SP] No Tests found for", state.location, state.date);
+      console.log("[SP] No Tests found for", loc, day);
       return;
     }
-    const fields = json.value[0].fields || {};
-    let parsed=[];
-    try { parsed = fields.DataJson ? JSON.parse(fields.DataJson) : []; }
-    catch(e){ console.warn("[SP] Tests DataJson parse error:", e); parsed=[]; }
 
-    const d = store.getDay(state.location,state.date);
+    const fields = json.value[0].fields || {};
+    let parsed = [];
+    try {
+      parsed = fields.DataJson ? JSON.parse(fields.DataJson) : [];
+    } catch (e) {
+      console.warn("[SP] Tests DataJson parse error:", e);
+      parsed = [];
+    }
+
+    const d = store.getDay(loc, day);
     d.tests = parsed;
     store.save();
     renderTests(d);
-    console.log("[SP] Tests loaded from SharePoint for", state.location, state.date, parsed);
+    console.log("[SP] Tests loaded from SharePoint for", loc, day, parsed);
   } catch (err) {
     console.error("[SP] Tests load threw error:", err);
   }
@@ -1059,6 +1092,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
