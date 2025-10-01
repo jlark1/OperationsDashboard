@@ -765,28 +765,26 @@ async function loadTestsFromSharePoint() {
 }
 // ===== Load Important Information/Overbooks =====
 async function loadNotesFromSharePoint() {
-    const location = document.getElementById("locationSelect").value;
-    const date = document.getElementById("datePicker").value;
-
     try {
-        const response = await fetch(`${graphBase}/lists/${listId}/items?$filter=fields/Title eq 'Notes_${location}_${date}'`, {
+        const location = document.getElementById("locationSelect").value;
+        const date = document.getElementById("datePicker").value;
+
+        const response = await fetch(`${graphBase}/lists/${listId}/items?$filter=startswith(Title,'Notes_${location}_${date}')`, {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
-            console.error("[SP] Notes load failed:", errorData);
+            console.error("[SP] Notes load failed:", await response.text());
             return;
         }
 
         const data = await response.json();
-        if (data.value && data.value.length > 0) {
-            document.getElementById("notesBox").value = data.value[0].fields.Notes || "";
-        } else {
-            document.getElementById("notesBox").value = "";
-        }
+        console.log("[SP] Notes loaded from SharePoint:", data);
 
-        console.log(`[SP] Notes loaded from SharePoint for ${location} ${date}`);
+        const notesBox = document.getElementById("notesBox");
+        if (notesBox && data.value.length > 0) {
+            notesBox.value = data.value[0].fields.Notes || "";
+        }
     } catch (err) {
         console.error("[SP] Notes load error:", err);
     }
@@ -794,32 +792,31 @@ async function loadNotesFromSharePoint() {
 
 // ===== Load Staffing Impacts =====
 async function loadStaffingFromSharePoint() {
-    const location = document.getElementById("locationSelect").value;
-    const date = document.getElementById("datePicker").value;
-
     try {
-        const response = await fetch(`${graphBase}/lists/${listId}/items?$filter=fields/Title eq 'Staffing_${location}_${date}'`, {
+        const location = document.getElementById("locationSelect").value;
+        const date = document.getElementById("datePicker").value;
+
+        const response = await fetch(`${graphBase}/lists/${listId}/items?$filter=startswith(Title,'Staffing_${location}_${date}')`, {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
-            console.error("[SP] Staffing load failed:", errorData);
+            console.error("[SP] Staffing load failed:", await response.text());
             return;
         }
 
         const data = await response.json();
-        if (data.value && data.value.length > 0) {
-            document.getElementById("staffingBox").value = data.value[0].fields.Staffing || "";
-        } else {
-            document.getElementById("staffingBox").value = "";
-        }
+        console.log("[SP] Staffing loaded from SharePoint:", data);
 
-        console.log(`[SP] Staffing loaded from SharePoint for ${location} ${date}`);
+        const staffingBox = document.getElementById("staffingBox");
+        if (staffingBox && data.value.length > 0) {
+            staffingBox.value = data.value[0].fields.Staffing || "";
+        }
     } catch (err) {
         console.error("[SP] Staffing load error:", err);
     }
 }
+
 
 
 /* ------- Equipment Issues ------- */
@@ -1023,6 +1020,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
