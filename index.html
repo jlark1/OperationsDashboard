@@ -794,7 +794,7 @@ document.getElementById("removeTest").onclick=()=>{
   store.save(); renderTests(d); 
 };
 
-/* ===== Tests Load (By Location + Date) ===== */
+/* ===== Load Tests from SharePoint (by Location + Date) ===== */
 async function loadTestsFromSharePoint() {
   try {
     const token = await getToken();
@@ -803,7 +803,7 @@ async function loadTestsFromSharePoint() {
 
     const url =
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items?` +
-      `$expand=fields&$filter=fields/Location eq '${loc}' and fields/Date eq '${day}'&$top=1`;
+      `$expand=fields&$filter=fields/Location eq '${loc}' and fields/Date eq '${day}'&$orderby=createdDateTime desc&$top=1`;
 
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` }
@@ -816,7 +816,7 @@ async function loadTestsFromSharePoint() {
 
     const json = await res.json();
     if (!json.value || json.value.length === 0) {
-      console.log("[SP] No Tests found for", loc, day);
+      console.log("[SP] No Tests item found for", loc, day);
       return;
     }
 
@@ -829,15 +829,17 @@ async function loadTestsFromSharePoint() {
       parsed = [];
     }
 
-    const d = store.getDay(loc, day);
+    const d = store.getDay(state.location, state.date);
     d.tests = parsed;
     store.save();
     renderTests(d);
+
     console.log("[SP] Tests loaded from SharePoint for", loc, day, parsed);
   } catch (err) {
     console.error("[SP] Tests load threw error:", err);
   }
 }
+
 /* ===== Notes Loader ===== */
 async function loadNotesFromSharePoint() {
   console.log("[SP] loadNotesFromSharePoint called");
@@ -1097,6 +1099,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
