@@ -369,104 +369,139 @@ async function savePatientCountToSharePoint(d) {
   await saveSimpleToList(patientCountListId, `${state.location} ${state.date} - PatientCount`, "Count", d.todayCount);
 }
 
-/* ===== Equipment / Building (no Date; stored as DataJson arrays) ===== */
+/* ===== Save Equipment (Upsert by Location, no Date) ===== */
 async function saveEquipToSharePoint(d) {
-  const payload = {
-    fields: {
-      Title: `${state.location} - Equipment`,
-      Location: state.location,
-      DataJson: JSON.stringify(d.equipment || [])
-    }
-  };
-
   try {
     const token = await getToken();
+    const loc = state.location;
+
+    // Try to find existing Equipment item for this location
     const findUrl =
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${equipListId}/items?` +
-      `$select=id&$expand=fields($select=Location)&` +
-      `$filter=fields/Location eq '${state.location}'&$top=1`;
+      `$expand=fields($select=Location)&$filter=fields/Location eq '${loc}'&$top=1`;
 
     const findRes = await fetch(findUrl, { headers: { Authorization: `Bearer ${token}` } });
+    if (!findRes.ok) {
+      console.error("[SP] Equip lookup failed:", findRes.status, await findRes.text());
+      return;
+    }
+    const findJson = await findRes.json();
+    const existing = (findJson.value && findJson.value.length > 0) ? findJson.value[0] : null;
 
-    let method = "POST";
-    let target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${equipListId}/items`;
+    // Data payload
+    const item = {
+      fields: {
+        Title: `${loc} - Equipment`,
+        Location: loc,
+        DataJson: JSON.stringify(d.equipment || [])
+      }
+    };
 
-    if (findRes.ok) {
-      const found = await findRes.json();
-      if (found.value && found.value.length) {
-        // Update instead of creating new
-        method = "PATCH";
-        target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${equipListId}/items/${found.value[0].id}/fields`;
+    if (existing) {
+      // Update existing
+      const updateUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${equipListId}/items/${existing.id}/fields`;
+      const updateRes = await fetch(updateUrl, {
+        method: "PATCH",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "If-Match": "*"
+        },
+        body: JSON.stringify(item.fields)
+      });
+      if (!updateRes.ok) {
+        console.error("[SP] Equip update failed:", updateRes.status, await updateRes.text());
+      } else {
+        d2("[SP] Equip updated in SharePoint:", loc);
+      }
+    } else {
+      // Create new
+      const createUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${equipListId}/items`;
+      const createRes = await fetch(createUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(item)
+      });
+      if (!createRes.ok) {
+        console.error("[SP] Equip create failed:", createRes.status, await createRes.text());
+      } else {
+        d2("[SP] Equip created in SharePoint:", loc);
       }
     }
-
-    const res = await fetch(target, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: method === "PATCH" ? JSON.stringify(payload.fields) : JSON.stringify(payload)
-    });
-
-    if (!res.ok) {
-      console.error("[SP] Equip save failed:", res.status, await res.text());
-    } else {
-      console.log("[SP] Equip saved OK:", state.location);
-    }
-  } catch (e) {
-    console.error("[SP] Equip save threw:", e);
+  } catch (err) {
+    console.error("[SP] Equip save threw error:", err);
   }
 }
 
+/* ===== Save Building (Upsert by Location, no Date) ===== */
 async function saveBuildToSharePoint(d) {
-  const payload = {
-    fields: {
-      Title: `${state.location} - Building`,
-      Location: state.location,
-      DataJson: JSON.stringify(d.building || [])
-    }
-  };
-
   try {
     const token = await getToken();
+    const loc = state.location;
+
+    // Try to find existing Building item for this location
     const findUrl =
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${buildListId}/items?` +
-      `$select=id&$expand=fields($select=Location)&` +
-      `$filter=fields/Location eq '${state.location}'&$top=1`;
+      `$expand=fields($select=Location)&$filter=fields/Location eq '${loc}'&$top=1`;
 
     const findRes = await fetch(findUrl, { headers: { Authorization: `Bearer ${token}` } });
+    if (!findRes.ok) {
+      console.error("[SP] Build lookup failed:", findRes.status, await findRes.text());
+      return;
+    }
+    const findJson = await findRes.json();
+    const existing = (findJson.value && findJson.value.length > 0) ? findJson.value[0] : null;
 
-    let method = "POST";
-    let target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${buildListId}/items`;
+    // Data payload
+    const item = {
+      fields: {
+        Title: `${loc} - Building`,
+        Location: loc,
+        DataJson: JSON.stringify(d.building || [])
+      }
+    };
 
-    if (findRes.ok) {
-      const found = await findRes.json();
-      if (found.value && found.value.length) {
-        method = "PATCH";
-        target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${buildListId}/items/${found.value[0].id}/fields`;
+    if (existing) {
+      // Update existing
+      const updateUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${buildListId}/items/${existing.id}/fields`;
+      const updateRes = await fetch(updateUrl, {
+        method: "PATCH",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "If-Match": "*"
+        },
+        body: JSON.stringify(item.fields)
+      });
+      if (!updateRes.ok) {
+        console.error("[SP] Build update failed:", updateRes.status, await updateRes.text());
+      } else {
+        d2("[SP] Build updated in SharePoint:", loc);
+      }
+    } else {
+      // Create new
+      const createUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${buildListId}/items`;
+      const createRes = await fetch(createUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(item)
+      });
+      if (!createRes.ok) {
+        console.error("[SP] Build create failed:", createRes.status, await createRes.text());
+      } else {
+        d2("[SP] Build created in SharePoint:", loc);
       }
     }
-
-    const res = await fetch(target, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: method === "PATCH" ? JSON.stringify(payload.fields) : JSON.stringify(payload)
-    });
-
-    if (!res.ok) {
-      console.error("[SP] Build save failed:", res.status, await res.text());
-    } else {
-      console.log("[SP] Build saved OK:", state.location);
-    }
-  } catch (e) {
-    console.error("[SP] Build save threw:", e);
+  } catch (err) {
+    console.error("[SP] Build save threw error:", err);
   }
 }
-
 </script>
 
 <style>
@@ -981,71 +1016,95 @@ async function loadStaffingFromSharePoint() {
     console.error("[SP] Staffing load threw error:", err);
   }
 }
-/* ===== Load Equipment (no Date) ===== */
+/* ===== Load Equipment (location-scoped, no Date) ===== */
 async function loadEquipFromSharePoint() {
   try {
     const token = await getToken();
+    const loc = state.location;
+    const filter = encodeURIComponent(`fields/Location eq '${loc}'`);
     const url =
-      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${equipListId}/items?` +
-      `$expand=fields&$filter=fields/Location eq '${state.location}'&$top=1`;
+      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
+      `/lists/${equipListId}/items?$expand=fields($select=Location,DataJson)&$filter=${filter}&$top=1`;
 
-    console.log("[SP] Equip: load URL", url);
+    d2("Equip: load URL", url);
 
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-
     if (!res.ok) {
       console.error("[SP] Equip load failed:", res.status, await res.text());
       return;
     }
 
     const json = await res.json();
+    let arr = [];
     if (json.value && json.value.length) {
-      const data = JSON.parse(json.value[0].fields.DataJson || "[]");
-      console.log("[SP] Equip: loaded OK", state.location, data);
-      state.equipment = data;
-      renderEquipment(); // assumes you have a render function
+      try {
+        arr = json.value[0].fields.DataJson ? JSON.parse(json.value[0].fields.DataJson) : [];
+      } catch (e) {
+        console.warn("[SP] Equip DataJson parse error:", e);
+        arr = [];
+      }
+      d2("Equip: loaded OK", loc, arr.length);
     } else {
-      console.log("[SP] Equip: no entry found for", state.location);
-      state.equipment = [];
-      renderEquipment();
+      d2("Equip: no entry found for", loc);
     }
+
+    // Update local store
+    const equip = store.getEquip(loc);
+    equip.length = 0; // clear
+    equip.push(...arr);
+    store.save();
+
+    renderEquipTable(equip);
   } catch (e) {
     console.error("[SP] Equip load threw:", e);
   }
 }
 
-/* ===== Load Building (no Date) ===== */
+/* ===== Load Building (location-scoped, no Date) ===== */
 async function loadBuildFromSharePoint() {
   try {
     const token = await getToken();
+    const loc = state.location;
+    const filter = encodeURIComponent(`fields/Location eq '${loc}'`);
     const url =
-      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${buildListId}/items?` +
-      `$expand=fields&$filter=fields/Location eq '${state.location}'&$top=1`;
+      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
+      `/lists/${buildListId}/items?$expand=fields($select=Location,DataJson)&$filter=${filter}&$top=1`;
 
-    console.log("[SP] Build: load URL", url);
+    d2("Build: load URL", url);
 
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-
     if (!res.ok) {
       console.error("[SP] Build load failed:", res.status, await res.text());
       return;
     }
 
     const json = await res.json();
+    let arr = [];
     if (json.value && json.value.length) {
-      const data = JSON.parse(json.value[0].fields.DataJson || "[]");
-      console.log("[SP] Build: loaded OK", state.location, data);
-      state.building = data;
-      renderBuilding(); // assumes you have a render function
+      try {
+        arr = json.value[0].fields.DataJson ? JSON.parse(json.value[0].fields.DataJson) : [];
+      } catch (e) {
+        console.warn("[SP] Build DataJson parse error:", e);
+        arr = [];
+      }
+      d2("Build: loaded OK", loc, arr.length);
     } else {
-      console.log("[SP] Build: no entry found for", state.location);
-      state.building = [];
-      renderBuilding();
+      d2("Build: no entry found for", loc);
     }
+
+    // Update local store
+    const build = store.getBuild(loc);
+    build.length = 0; // clear
+    build.push(...arr);
+    store.save();
+
+    renderBuildTable(build);
   } catch (e) {
     console.error("[SP] Build load threw:", e);
   }
 }
+
+
 /* ------- Topbar & render ------- */
 function renderTopbar(d){
   const sel=document.getElementById("locationSel");
@@ -1191,6 +1250,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
