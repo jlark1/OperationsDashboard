@@ -8,6 +8,10 @@
 <script src="https://alcdn.msauth.net/browser/2.38.1/js/msal-browser.min.js"></script>
 
 <script>
+/* ===== Debug toggle (Part 1) ===== */
+const DEBUG_P1 = true;
+const d1 = (...args) => { if (DEBUG_P1) console.log("[P1]", ...args); };
+
 /* ===== MSAL + Graph Config ===== */
 const loginScopes = ["openid", "profile", "User.Read"];
 const graphScopes = ["Sites.ReadWrite.All"];
@@ -26,21 +30,27 @@ const msalInstance = new msal.PublicClientApplication(msalConfig);
 /* ===== Login & Token ===== */
 async function ensureLogin() {
   let account = msalInstance.getAllAccounts()[0];
+  d1("ensureLogin: existing account?", !!account);
   if (!account) {
+    d1("ensureLogin: prompting loginPopup");
     const resp = await msalInstance.loginPopup({ scopes: loginScopes, prompt: "select_account" });
     msalInstance.setActiveAccount(resp.account);
     account = resp.account;
   }
+  d1("ensureLogin: active account", account?.username);
   return account;
 }
 async function getToken() {
   const account = await ensureLogin();
   try {
+    d1("getToken: acquireTokenSilent");
     const r = await msalInstance.acquireTokenSilent({ scopes: graphScopes, account });
+    d1("getToken: success (silent)");
     return r.accessToken;
   } catch (e) {
-    console.warn("[MSAL] Silent token failed, falling back to popup:", e);
+    d1("getToken: silent failed, falling back to popup", e);
     const r = await msalInstance.acquireTokenPopup({ scopes: graphScopes, account });
+    d1("getToken: success (popup)");
     return r.accessToken;
   }
 }
@@ -51,12 +61,39 @@ const podsListId = "b4cf5247-2062-4440-8fb5-338f2a09cc1c";
 const testsListId = "369707df-a571-4ba6-a04b-1aea8b3ef66f";
 const notesListId = "771054d8-ecc7-40e8-ab57-9488af13e727";
 const staffingListId = "204e2f8f-afb9-4f0b-98be-90e18c5a4308";
-const pfcListId = "a7786d2e-f0f1-499f-90e4-df668b927ebf";
+const pfcListId = "a7786d2e-f0f1-499f-90e18c5a927ebf".replace("927","d9b"); // safety guard if pasted; will be corrected below
+// Correct pfcListId (keep final value exactly as provided originally)
+const _pfcFix = "a7786d2e-f0f1-499f-90e4-df668b927ebf"; 
 const patientCountListId = "d151ffc1-5d78-4aec-8689-5f558f7d9b20";
 const equipListId = "a72e0d60-faca-4421-b137-b0f537745ccc";
 const buildListId = "14dee9e3-b932-472e-a93f-b7da9abb9ad3";
+const PFC_LIST_ID = _pfcFix;
 
-/* ===== Save Helpers ===== */
+/* ===== Generic Save Helpers (used by simple cases) ===== */
+async function doSave(listId, item) {
+  try {
+    const token = await getToken();
+    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`;
+    d1("doSave: POST", { listId, url, item });
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(item)
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      console.error("[SP] Save failed:", res.status, t);
+      return null;
+    } else {
+      const data = await res.json();
+      d1("doSave: OK", data?.id);
+      return data;
+    }
+  } catch (err) {
+    console.error("[SP] Save failed:", err);
+    return null;
+  }
+}
 async function saveToList(listId, title, dataObj) {
   const item = {
     fields: {
@@ -68,8 +105,6 @@ async function saveToList(listId, title, dataObj) {
   };
   return doSave(listId, item);
 }
-
-/* For lists that do NOT have a Date column (Equipment, Building) */
 async function saveToListNoDate(listId, title, dataObj) {
   const item = {
     fields: {
@@ -80,404 +115,271 @@ async function saveToListNoDate(listId, title, dataObj) {
   };
   return doSave(listId, item);
 }
-
 async function saveSimpleToList(listId, title, fieldName, value) {
   const item = { fields: { Title: title } };
   item.fields[fieldName] = value;
   return doSave(listId, item);
 }
-async function doSave(listId, item) {
-  try {
-    const token = await getToken();
-    const res = await fetch(
-      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`,
-      {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(item)
-      }
-    );
-    if (!res.ok) {
-      console.error("[SP] Save failed:", res.status, await res.text());
-    } else {
-      const data = await res.json();
-      console.log(`Saved to list ${listId}. Item ID:`, data.id);
-    }
-  } catch (err) {
-    console.error("[SP] Save failed:", err);
-  }
-}
-/* ===== Load Helpers ===== */
-async function loadFromList(listId, filterTitle) {
-  try {
-    const token = await getToken();
-    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$filter=fields/Title eq '${filterTitle}'&$orderby=createdDateTime desc&$top=1`;
 
-    const res = await fetch(url, {
-      headers: { "Authorization": `Bearer ${token}` }
-    });
-    if (!res.ok) {
-      console.error("[SP] Load failed:", res.status, await res.text());
-      return null;
-    }
-    const data = await res.json();
-    if (data.value && data.value.length > 0) {
-      return data.value[0].fields.DataJson ? JSON.parse(data.value[0].fields.DataJson) : null;
-    }
-    return null;
-  } catch (err) {
-    console.error("[SP] Load failed:", err);
-    return null;
-  }
+/* ===== Upsert Helpers (filter builder) ===== */
+function buildFilterLocationDate(loc, day) {
+  // Encode the whole filter string for safety
+  return encodeURIComponent(`fields/Location eq '${loc}' and fields/Date eq '${day}'`);
 }
+
 /* ===== Pods Save (Upsert by Location + Date) ===== */
 async function savePodsToSharePoint(d) {
   try {
     const token = await getToken();
     const loc = state.location;
     const day = state.date;
-
-    // 1. Try to find an existing Pods item for this location/date
+    const filter = buildFilterLocationDate(loc, day);
     const findUrl =
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items?` +
-      `$expand=fields&$filter=fields/Location eq '${loc}' and fields/Date eq '${day}'&$top=1`;
+      `$expand=fields&$filter=${filter}&$top=1`;
+    d1("Pods: lookup", findUrl);
 
-    const findRes = await fetch(findUrl, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-
+    const findRes = await fetch(findUrl, { headers: { Authorization: `Bearer ${token}` } });
     if (!findRes.ok) {
       console.error("[SP] Pods lookup failed:", findRes.status, await findRes.text());
       return;
     }
-
     const findJson = await findRes.json();
     const existing = (findJson.value && findJson.value.length > 0) ? findJson.value[0] : null;
 
-    // Data payload
-    const item = {
-      fields: {
-        Title: `${loc} ${day} - Pods`,
-        Location: loc,
-        Date: day,
-        DataJson: JSON.stringify(d.pods)
-      }
+    const fields = {
+      Title: `${loc} ${day} - Pods`,
+      Location: loc,
+      Date: day,
+      DataJson: JSON.stringify(d.pods)
     };
 
     if (existing) {
-      // 2a. Update existing
       const updateUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items/${existing.id}/fields`;
+      d1("Pods: update", updateUrl, fields);
       const updateRes = await fetch(updateUrl, {
         method: "PATCH",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "If-Match": "*"
-        },
-        body: JSON.stringify(item.fields)
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json", "If-Match": "*" },
+        body: JSON.stringify(fields)
       });
-
       if (!updateRes.ok) {
         console.error("[SP] Pods update failed:", updateRes.status, await updateRes.text());
       } else {
-        console.log("[SP] Pods updated in SharePoint:", loc, day);
+        d1("Pods: updated", existing.id);
       }
     } else {
-      // 2b. Create new
       const createUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${podsListId}/items`;
+      const payload = { fields };
+      d1("Pods: create", createUrl, payload);
       const createRes = await fetch(createUrl, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(item)
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
       });
-
       if (!createRes.ok) {
         console.error("[SP] Pods create failed:", createRes.status, await createRes.text());
       } else {
-        console.log("[SP] Pods created in SharePoint:", loc, day);
+        const data = await createRes.json();
+        d1("Pods: created", data?.id);
       }
     }
   } catch (err) {
     console.error("[SP] Pods save threw error:", err);
   }
 }
-/* ===== Save Tests to SharePoint (Upsert by Location + Date) ===== */
+
+/* ===== Special Testing Save (Upsert by Location + Date) ===== */
 async function saveTestsToSharePoint(d) {
   try {
     const token = await getToken();
     const loc = state.location;
     const day = state.date;
-
-    // 1. Look for an existing Tests item for this location/date
+    const filter = buildFilterLocationDate(loc, day);
     const findUrl =
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items?` +
-      `$expand=fields&$filter=fields/Location eq '${loc}' and fields/Date eq '${day}'&$top=1`;
+      `$expand=fields&$filter=${filter}&$top=1`;
+    d1("Tests: lookup", findUrl);
 
-    const findRes = await fetch(findUrl, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-
+    const findRes = await fetch(findUrl, { headers: { Authorization: `Bearer ${token}` } });
     if (!findRes.ok) {
       console.error("[SP] Tests lookup failed:", findRes.status, await findRes.text());
       return;
     }
+    const found = await findRes.json();
+    const existing = (found.value && found.value.length > 0) ? found.value[0] : null;
 
-    const findJson = await findRes.json();
-    const existing = (findJson.value && findJson.value.length > 0) ? findJson.value[0] : null;
-
-    // 2. Prepare payload
-    const item = {
-      fields: {
-        Title: `${loc} ${day} - Tests`,
-        Location: loc,
-        Date: day,
-        DataJson: JSON.stringify(d.tests || [])
-      }
+    const fields = {
+      Title: `${loc} ${day} - Tests`,
+      Location: loc,
+      Date: day,
+      DataJson: JSON.stringify(d.tests || [])
     };
 
     if (existing) {
-      // 3a. Update existing
-      const updateUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items/${existing.id}/fields`;
-      const updateRes = await fetch(updateUrl, {
+      const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items/${existing.id}/fields`;
+      d1("Tests: update", url, fields);
+      const res = await fetch(url, {
         method: "PATCH",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "If-Match": "*"   // <— important to prevent 412 Precondition Failed
-        },
-        body: JSON.stringify(item.fields)
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "If-Match": "*" },
+        body: JSON.stringify(fields)
       });
-
-      if (!updateRes.ok) {
-        console.error("[SP] Tests update failed:", updateRes.status, await updateRes.text());
-      } else {
-        console.log("[SP] Tests updated in SharePoint:", loc, day);
-      }
+      if (!res.ok) console.error("[SP] Tests update failed:", res.status, await res.text());
+      else d1("Tests: updated", existing.id);
     } else {
-      // 3b. Create new
-      const createUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items`;
-      const createRes = await fetch(createUrl, {
+      const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items`;
+      const payload = { fields };
+      d1("Tests: create", url, payload);
+      const res = await fetch(url, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(item)
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
       });
-
-      if (!createRes.ok) {
-        console.error("[SP] Tests create failed:", createRes.status, await createRes.text());
-      } else {
-        console.log("[SP] Tests created in SharePoint:", loc, day);
+      if (!res.ok) console.error("[SP] Tests create failed:", res.status, await res.text());
+      else {
+        const data = await res.json();
+        d1("Tests: created", data?.id);
       }
     }
-  } catch (err) {
-    console.error("[SP] Tests save threw error:", err);
+  } catch (e) {
+    console.error("[SP] Tests save threw:", e);
   }
 }
 
-/* ===== Save Notes (Important Information/Overbooks) ===== */
+/* ===== Important Information/Overbooks Save (Upsert by Location + Date) ===== */
 async function saveNotesToSharePoint(d) {
-  const payload = {
-    fields: {
-      Title: `${state.location} ${state.date} - Notes`,
-      Location: state.location,
-      Date: state.date,
-      DataJson: JSON.stringify(d.notes || "")
-    }
-  };
-
   try {
     const token = await getToken();
+    const loc = state.location;
+    const day = state.date;
+    const filter = buildFilterLocationDate(loc, day);
     const findUrl =
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${notesListId}/items?` +
-      `$select=id&$expand=fields($select=Location,Date)&` +
-      `$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&$top=1`;
+      `$expand=fields&$filter=${filter}&$top=1`;
+    d1("Notes: lookup", findUrl);
 
     const findRes = await fetch(findUrl, { headers: { Authorization: `Bearer ${token}` } });
-
-    let method = "POST";
-    let target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${notesListId}/items`;
-
-    if (findRes.ok) {
-      const found = await findRes.json();
-      if (found.value && found.value.length) {
-        method = "PATCH";
-        target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${notesListId}/items/${found.value[0].id}/fields`;
-      }
+    if (!findRes.ok) {
+      console.error("[SP] Notes lookup failed:", findRes.status, await findRes.text());
+      return;
     }
+    const found = await findRes.json();
+    const existing = (found.value && found.value.length > 0) ? found.value[0] : null;
 
-    const res = await fetch(target, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: method === "PATCH" ? JSON.stringify(payload.fields) : JSON.stringify(payload)
-    });
+    const fields = {
+      Title: `${loc} ${day} - Notes`,
+      Location: loc,
+      Date: day,
+      DataJson: JSON.stringify(d.notes || "")
+    };
 
-    if (!res.ok) {
-      console.error("[SP] Notes save failed:", res.status, await res.text());
+    if (existing) {
+      const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${notesListId}/items/${existing.id}/fields`;
+      d1("Notes: update", url, fields);
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "If-Match": "*" },
+        body: JSON.stringify(fields)
+      });
+      if (!res.ok) console.error("[SP] Notes update failed:", res.status, await res.text());
+      else d1("Notes: updated", existing.id);
     } else {
-      console.log("[SP] Notes saved to SharePoint for", state.location, state.date);
+      const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${notesListId}/items`;
+      const payload = { fields };
+      d1("Notes: create", url, payload);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) console.error("[SP] Notes create failed:", res.status, await res.text());
+      else {
+        const data = await res.json();
+        d1("Notes: created", data?.id);
+      }
     }
   } catch (e) {
     console.error("[SP] Notes save threw:", e);
   }
 }
 
-/* ===== Save Staffing ===== */
+/* ===== Staffing Impacts Save (Upsert by Location + Date) ===== */
 async function saveStaffingToSharePoint(d) {
-  const payload = {
-    fields: {
-      Title: `${state.location} ${state.date} - Staffing`,
-      Location: state.location,
-      Date: state.date,
-      DataJson: JSON.stringify(d.staffing || "")
-    }
-  };
-
   try {
     const token = await getToken();
+    const loc = state.location;
+    const day = state.date;
+    const filter = buildFilterLocationDate(loc, day);
     const findUrl =
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${staffingListId}/items?` +
-      `$select=id&$expand=fields($select=Location,Date)&` +
-      `$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&$top=1`;
+      `$expand=fields&$filter=${filter}&$top=1`;
+    d1("Staffing: lookup", findUrl);
 
     const findRes = await fetch(findUrl, { headers: { Authorization: `Bearer ${token}` } });
-
-    let method = "POST";
-    let target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${staffingListId}/items`;
-
-    if (findRes.ok) {
-      const found = await findRes.json();
-      if (found.value && found.value.length) {
-        method = "PATCH";
-        target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${staffingListId}/items/${found.value[0].id}/fields`;
-      }
+    if (!findRes.ok) {
+      console.error("[SP] Staffing lookup failed:", findRes.status, await findRes.text());
+      return;
     }
+    const found = await findRes.json();
+    const existing = (found.value && found.value.length > 0) ? found.value[0] : null;
 
-    const res = await fetch(target, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: method === "PATCH" ? JSON.stringify(payload.fields) : JSON.stringify(payload)
-    });
+    const fields = {
+      Title: `${loc} ${day} - Staffing`,
+      Location: loc,
+      Date: day,
+      DataJson: JSON.stringify(d.staffing || "")
+    };
 
-    if (!res.ok) {
-      console.error("[SP] Staffing save failed:", res.status, await res.text());
+    if (existing) {
+      const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${staffingListId}/items/${existing.id}/fields`;
+      d1("Staffing: update", url, fields);
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "If-Match": "*" },
+        body: JSON.stringify(fields)
+      });
+      if (!res.ok) console.error("[SP] Staffing update failed:", res.status, await res.text());
+      else d1("Staffing: updated", existing.id);
     } else {
-      console.log("[SP] Staffing saved to SharePoint for", state.location, state.date);
+      const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${staffingListId}/items`;
+      const payload = { fields };
+      d1("Staffing: create", url, payload);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) console.error("[SP] Staffing create failed:", res.status, await res.text());
+      else {
+        const data = await res.json();
+        d1("Staffing: created", data?.id);
+      }
     }
   } catch (e) {
     console.error("[SP] Staffing save threw:", e);
   }
 }
 
-
-// Attach button handlers
-document.getElementById("notesSave")?.addEventListener("click", async () => {
-  const d = store.getDay(state.location, state.date);
-  d.notes = document.getElementById("notesBox").value;
-  store.save();
-  await saveNotesToSharePoint(d);
-});
-
-document.getElementById("staffingSave")?.addEventListener("click", async () => {
-  const d = store.getDay(state.location, state.date);
-  d.staffing = document.getElementById("staffingBox").value;
-  store.save();
-  await saveStaffingToSharePoint(d);
-});
-
-
+/* ===== PFC & Patient Count (simple posts) ===== */
 async function savePfcToSharePoint(d) {
-  await saveSimpleToList(pfcListId, `${state.location} ${state.date} - PFC`, "PFC", d.pfc);
-  console.log("PFC saved to SharePoint:", d.pfc);
+  d1("PFC: saving", d.pfc);
+  await saveSimpleToList(PFC_LIST_ID, `${state.location} ${state.date} - PFC`, "PFC", d.pfc);
 }
 async function savePatientCountToSharePoint(d) {
+  d1("PatientCount: saving", d.todayCount);
   await saveSimpleToList(patientCountListId, `${state.location} ${state.date} - PatientCount`, "Count", d.todayCount);
-  console.log("Patient Count saved to SharePoint:", d.todayCount);
 }
 
-/* IMPORTANT: no-date helpers for Equipment/Building */
-async function saveEquipToSharePoint(d)  { await saveToListNoDate(equipListId, `${state.location} - Equipment`, d.equipment); }
-async function saveBuildToSharePoint(d)  { await saveToListNoDate(buildListId, `${state.location} - Building`,  d.building); }
-
-/* ===== DOM Handlers (top-level saves that include Graph posts) ===== */
-document.addEventListener("DOMContentLoaded", () => {
-  // Pods
-  document.getElementById("savePods")?.addEventListener("click", async () => {
-    const d = store.getDay(state.location, state.date);
-    ["podA","podB","podC","podD"].forEach(id => {
-      const prov = document.getElementById(id+"prov");
-      if (prov) {
-        d.pods[id] = {
-          prov: prov.value,
-          ca: document.getElementById(id+"ca").value,
-          techs: document.getElementById(id+"techs").value
-        };
-      }
-    });
-    ["resident","contactLens","float","aScan","lasik"].forEach(id => {
-      const el = document.getElementById(id+"Val");
-      if (el) d.pods[id] = { value: el.value };
-    });
-    d.opener = document.getElementById("opener").value;
-    d.zField = document.getElementById("zField").value;
-    if (state.location === "Hudson" || state.location === "Woodbury") {
-      const ortho = document.getElementById("orthoptist");
-      if (ortho) d.orthoptist = ortho.value;
-    } else { d.orthoptist = ""; }
-    store.save();
-    await savePodsToSharePoint(d);
-  });
-
-  // Special Testing
-  document.getElementById("saveTest")?.addEventListener("click", async () => {
-    const d = store.getDay(state.location, state.date);
-    d.tests = [...document.querySelectorAll("#testingFields input")].map(x=>({name:x.value}));
-    store.save();
-    await saveTestsToSharePoint(d);
-  });
-
-  // Notes
-  document.getElementById("notesSave")?.addEventListener("click", async () => {
-    const d = store.getDay(state.location, state.date);
-    d.notes = document.getElementById("notesBox").value;
-    store.save();
-    await saveNotesToSharePoint(d);
-  });
-
-  // Staffing
-  document.getElementById("staffingSave")?.addEventListener("click", async () => {
-    const d = store.getDay(state.location, state.date);
-    d.staffing = document.getElementById("staffingBox").value;
-    store.save();
-    await saveStaffingToSharePoint(d);
-  });
-
-  // PFC (auto-save)
-  document.getElementById("pfcInput")?.addEventListener("change", async () => {
-    const d = store.getDay(state.location, state.date);
-    d.pfc = document.getElementById("pfcInput").value;
-    store.save();
-    await savePfcToSharePoint(d);
-  });
-
-  // Patient Count (auto-save)
-  document.getElementById("todayCount")?.addEventListener("change", async () => {
-    const d = store.getDay(state.location, state.date);
-    d.todayCount = document.getElementById("todayCount").value;
-    store.save();
-    await savePatientCountToSharePoint(d);
-  });
-});
+/* ===== Equipment / Building (no Date; stored as DataJson arrays) ===== */
+async function saveEquipToSharePoint(d) {
+  // d expected shape: { equipment: [...] }
+  d1("Equip: saving (no date)", Array.isArray(d?.equipment) ? d.equipment.length : "no array");
+  await saveToListNoDate(equipListId, `${state.location} - Equipment`, d.equipment || []);
+}
+async function saveBuildToSharePoint(d) {
+  // d expected shape: { building: [...] }
+  d1("Build: saving (no date)", Array.isArray(d?.building) ? d.building.length : "no array");
+  await saveToListNoDate(buildListId, `${state.location} - Building`, d.building || []);
+}
 </script>
 
 <style>
@@ -615,6 +517,10 @@ td input {
 </div>
 
 <script>
+/* ===== Debug toggle (Part 2) ===== */
+const DEBUG_P2 = true;
+const d2 = (...args) => { if (DEBUG_P2) console.log("[P2]", ...args); };
+
 /* ------- State & store ------- */
 const LOCS = ["Stillwater","Hudson","Woodbury","New Richmond","Lino Lakes"];
 const KEY = "opsDashPodsCA";
@@ -623,18 +529,17 @@ const store = {
   _data:null,
   load(){ 
     this._data=JSON.parse(localStorage.getItem(KEY)||"null")||{data:{}}; 
-    console.log("[STORE] Loaded data:", this._data);
+    d2("[STORE] Loaded data:", this._data);
   },
   save(){ 
     localStorage.setItem(KEY,JSON.stringify(this._data)); 
-    console.log("[STORE] Saved state for", state.location, state.date);
+    d2("[STORE] Saved state for", state.location, state.date);
   },
   getDay(loc,date){
     if(!this._data.data[loc]) this._data.data[loc]={};
     if(!this._data.data[loc][date]) this._data.data[loc][date]={
       pfc:"", todayCount:"", opener:"", zField:"", orthoptist:"",
-      pods:{}, tests:[{},{},{}], 
-      notes:"", staffing:""
+      pods:{}, tests:[{},{},{}], notes:"", staffing:""
     };
     return this._data.data[loc][date];
   },
@@ -660,7 +565,6 @@ function renderPods(day){
     {id:"float",label:"Float"},{id:"aScan",label:"A-Scan"},
     {id:"lasik",label:"LASIK"} 
   ];
-
   const hiddenByLoc={ 
     "Hudson":["resident","aScan","lasik"], 
     "Lino Lakes":["resident","aScan","lasik"], 
@@ -668,10 +572,8 @@ function renderPods(day){
     "Woodbury":["aScan","lasik"], 
     "Stillwater":[] 
   };
-
   const grid=document.getElementById("podsGrid");
   grid.innerHTML="";
-
   allPods.filter(p=>!hiddenByLoc[state.location].includes(p.id)).forEach(p=>{
     const d=day.pods[p.id]||{};
     const card=document.createElement("div");
@@ -686,18 +588,17 @@ function renderPods(day){
     }
     grid.appendChild(card);
   });
-
   if(state.location==="Hudson" || state.location==="Woodbury"){
     const card=document.createElement("div");
     card.className="pod-card";
     card.innerHTML=`<label>Orthoptist</label><input id="orthoptist" placeholder="Orthoptist" value="${day.orthoptist||""}">`;
     grid.appendChild(card);
   }
-
   document.getElementById("opener").value=day.opener||"";
   document.getElementById("zField").value=day.zField||"";
 }
 
+/* Pods Save button */
 document.getElementById("savePods").onclick=async ()=>{
   const d=store.getDay(state.location,state.date);
   ["podA","podB","podC","podD"].forEach(id=>{
@@ -721,54 +622,56 @@ document.getElementById("savePods").onclick=async ()=>{
     if(ortho) d.orthoptist=ortho.value; 
   } else { d.orthoptist=""; }
   store.save();
-  try { await savePodsToSharePoint(d); } catch(err) { console.error("[SP] Save pods failed:", err); }
+  try { 
+    d2("UI: savePods -> upsert");
+    await savePodsToSharePoint(d); 
+    // Reload to confirm latest
+    await loadPodsFromSharePoint();
+  } catch(err) { console.error("[SP] Save pods failed:", err); }
 };
-
-/* ===== Pods Loader ===== */
-async function loadPodsFromSharePoint() {
-  try {
-    const token = await getToken();
-    const filter = encodeURIComponent(`fields/Location eq '${state.location}' and fields/Date eq '${state.date}'`);
-    const url =
-      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
-      `/lists/${podsListId}/items?$expand=fields&$filter=${filter}`;
-
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) {
-      console.error("[SP] Pods load failed:", res.status, await res.text());
-      return;
-    }
-    const json = await res.json();
-    if (!json.value || json.value.length === 0) {
-      console.log("[SP] No Pods item found for", state.location, state.date);
-      return;
-    }
-    const fields = json.value[0].fields || {};
-    let parsed={};
-    try { parsed = fields.DataJson ? JSON.parse(fields.DataJson) : {}; }
-    catch(e){ console.warn("[SP] Pods DataJson parse error:", e); parsed={}; }
-
-    const d = store.getDay(state.location,state.date);
-    d.pods = parsed;
-    store.save();
-    renderPods(d);
-    console.log("[SP] Pods loaded from SharePoint for", state.location, state.date, parsed);
-  } catch (err) {
-    console.error("[SP] Pods load threw error:", err);
-  }
-}
-
 document.getElementById("clearPods").onclick=()=>{
   const d=store.getDay(state.location,state.date);
   d.pods={}; d.opener=""; d.zField=""; d.orthoptist="";
   store.save(); renderPods(d); fitPodsCard();
 };
 
+/* ===== Pods Loader (from SharePoint) ===== */
+async function loadPodsFromSharePoint() {
+  try {
+    const token = await getToken();
+    const loc = state.location;
+    const day = state.date;
+    const filter = encodeURIComponent(`fields/Location eq '${loc}' and fields/Date eq '${day}'`);
+    const url =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
+      `/lists/${podsListId}/items?$expand=fields($select=Location,Date,DataJson)&$filter=${filter}&$top=1`;
+    d2("Pods: load URL", url);
+
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { console.error("[SP] Pods load failed:", res.status, await res.text()); return; }
+    const json = await res.json();
+    if (!json.value || json.value.length === 0) { d2("Pods: no item for", loc, day); return; }
+
+    const fields = json.value[0].fields || {};
+    let parsed = {};
+    try { parsed = fields.DataJson ? JSON.parse(fields.DataJson) : {}; }
+    catch (e) { console.warn("[SP] Pods DataJson parse error:", e); parsed = {}; }
+
+    const d = store.getDay(state.location, state.date);
+    d.pods = parsed;
+    store.save();
+    renderPods(d);
+    d2("Pods: loaded OK", loc, day, parsed);
+  } catch (err) {
+    console.error("[SP] Pods load threw error:", err);
+  }
+}
+
 /* ------- Special Testing ------- */
 function renderTests(d){ 
   const cont=document.getElementById("testingFields"); 
   cont.innerHTML=""; 
-  const arr=d.tests.length ? d.tests : [{},{},{}]; 
+  const arr=d.tests && d.tests.length ? d.tests : [{},{},{}]; 
   arr.forEach((t,i)=>{ 
     const input=document.createElement("input"); 
     input.placeholder="Test "+(i+1); 
@@ -777,11 +680,13 @@ function renderTests(d){
     cont.appendChild(input); 
   }); 
 }
-document.getElementById("saveTest").onclick=async()=>{ 
+document.getElementById("saveTest").onclick=async ()=>{ 
   const d=store.getDay(state.location,state.date); 
-  d.tests=[...document.querySelectorAll("#testingFields input")].map(x=>({name:x.value})); 
+  d.tests=[...document.querySelectorAll("#testingFields input")].map(x=>({name:x.value}));
   store.save(); 
-  try { await saveTestsToSharePoint(d); } catch(err) { console.error("[SP] Save tests failed:", err); }
+  d2("UI: saveTest -> upsert");
+  await saveTestsToSharePoint(d);
+  await loadTestsFromSharePoint();
 };
 document.getElementById("addTest").onclick=()=>{ 
   const d=store.getDay(state.location,state.date); 
@@ -794,107 +699,35 @@ document.getElementById("removeTest").onclick=()=>{
   store.save(); renderTests(d); 
 };
 
-/* ===== Load Tests from SharePoint (by Location + Date) ===== */
+/* ===== Special Testing Loader ===== */
 async function loadTestsFromSharePoint() {
   try {
     const token = await getToken();
     const loc = state.location;
     const day = state.date;
-
+    const filter = encodeURIComponent(`fields/Location eq '${loc}' and fields/Date eq '${day}'`);
     const url =
-      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${testsListId}/items?` +
-      `$expand=fields&$filter=fields/Location eq '${loc}' and fields/Date eq '${day}'&$orderby=createdDateTime desc&$top=1`;
+      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
+      `/lists/${testsListId}/items?$expand=fields($select=Location,Date,DataJson)&$filter=${filter}&$top=1`;
+    d2("Tests: load URL", url);
 
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-
-    if (!res.ok) {
-      console.error("[SP] Tests load failed:", res.status, await res.text());
-      return;
-    }
-
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { console.error("[SP] Tests load failed:", res.status, await res.text()); return; }
     const json = await res.json();
-    if (!json.value || json.value.length === 0) {
-      console.log("[SP] No Tests item found for", loc, day);
-      return;
-    }
+    if (!json.value || json.value.length === 0) { d2("Tests: no item for", loc, day); return; }
 
     const fields = json.value[0].fields || {};
-    let parsed = [];
-    try {
-      parsed = fields.DataJson ? JSON.parse(fields.DataJson) : [];
-    } catch (e) {
-      console.warn("[SP] Tests DataJson parse error:", e);
-      parsed = [];
-    }
+    let arr = [];
+    try { arr = fields.DataJson ? JSON.parse(fields.DataJson) : []; }
+    catch (e) { console.warn("[SP] Tests DataJson parse error:", e); arr = []; }
 
     const d = store.getDay(state.location, state.date);
-    d.tests = parsed;
+    d.tests = Array.isArray(arr) ? arr : [];
     store.save();
     renderTests(d);
-
-    console.log("[SP] Tests loaded from SharePoint for", loc, day, parsed);
+    d2("Tests: loaded OK", loc, day, d.tests.length);
   } catch (err) {
     console.error("[SP] Tests load threw error:", err);
-  }
-}
-
-/* ===== Notes Loader ===== */
-async function loadNotesFromSharePoint() {
-  console.log("[SP] loadNotesFromSharePoint called");
-  try {
-    const token = await getToken();
-    const url =
-      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${notesListId}/items?` +
-      `$expand=fields&$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&$top=1`;
-
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) {
-      console.error("[SP] Notes load failed:", res.status, await res.text());
-      return;
-    }
-
-    const json = await res.json();
-    if (json.value && json.value.length > 0) {
-      const fields = json.value[0].fields;
-      const d = store.getDay(state.location, state.date);
-      d.notes = fields.DataJson ? JSON.parse(fields.DataJson) : "";
-      store.save();
-      document.getElementById("notesBox").value = d.notes;
-      console.log("[SP] Notes loaded from SharePoint:", d.notes);
-    }
-  } catch (err) {
-    console.error("[SP] Notes load threw:", err);
-  }
-}
-
-/* ===== Staffing Loader ===== */
-async function loadStaffingFromSharePoint() {
-  console.log("[SP] loadStaffingFromSharePoint called");
-  try {
-    const token = await getToken();
-    const url =
-      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${staffingListId}/items?` +
-      `$expand=fields&$filter=fields/Location eq '${state.location}' and fields/Date eq '${state.date}'&$top=1`;
-
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) {
-      console.error("[SP] Staffing load failed:", res.status, await res.text());
-      return;
-    }
-
-    const json = await res.json();
-    if (json.value && json.value.length > 0) {
-      const fields = json.value[0].fields;
-      const d = store.getDay(state.location, state.date);
-      d.staffing = fields.DataJson ? JSON.parse(fields.DataJson) : "";
-      store.save();
-      document.getElementById("staffingBox").value = d.staffing;
-      console.log("[SP] Staffing loaded from SharePoint:", d.staffing);
-    }
-  } catch (err) {
-    console.error("[SP] Staffing load threw:", err);
   }
 }
 
@@ -980,17 +813,87 @@ document.querySelector("#buildTable tbody").addEventListener("click",async e=>{
   }
 });
 
-/* ------- Notes / Staffing ------- */
-document.getElementById("notesSave").onclick=()=>{ 
+/* ------- Notes / Staffing (UI handlers call SP upsert) ------- */
+document.getElementById("notesSave").onclick=async ()=>{ 
   const d=store.getDay(state.location,state.date); 
   d.notes=document.getElementById("notesBox").value; 
-  store.save(); 
+  store.save();
+  d2("UI: saveNotes -> upsert");
+  await saveNotesToSharePoint(d);
+  await loadNotesFromSharePoint();
 };
-document.getElementById("staffingSave").onclick=()=>{ 
+document.getElementById("staffingSave").onclick=async ()=>{ 
   const d=store.getDay(state.location,state.date); 
   d.staffing=document.getElementById("staffingBox").value; 
   store.save(); 
+  d2("UI: saveStaffing -> upsert");
+  await saveStaffingToSharePoint(d);
+  await loadStaffingFromSharePoint();
 };
+
+/* ===== Notes Loader ===== */
+async function loadNotesFromSharePoint() {
+  try {
+    const token = await getToken();
+    const loc = state.location;
+    const day = state.date;
+    const filter = encodeURIComponent(`fields/Location eq '${loc}' and fields/Date eq '${day}'`);
+    const url =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
+      `/lists/${notesListId}/items?$expand=fields($select=Location,Date,DataJson)&$filter=${filter}&$top=1`;
+    d2("Notes: load URL", url);
+
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { console.error("[SP] Notes load failed:", res.status, await res.text()); return; }
+    const json = await res.json();
+    if (!json.value || json.value.length === 0) { d2("Notes: no item for", loc, day); return; }
+
+    const fields = json.value[0].fields || {};
+    let val = "";
+    try { val = fields.DataJson ? JSON.parse(fields.DataJson) : ""; }
+    catch (e) { console.warn("[SP] Notes DataJson parse error:", e); val = ""; }
+
+    const d = store.getDay(state.location, state.date);
+    d.notes = typeof val === "string" ? val : "";
+    store.save();
+    document.getElementById("notesBox").value = d.notes;
+    d2("Notes: loaded OK", loc, day, (d.notes||"").length);
+  } catch (err) {
+    console.error("[SP] Notes load threw error:", err);
+  }
+}
+
+/* ===== Staffing Loader ===== */
+async function loadStaffingFromSharePoint() {
+  try {
+    const token = await getToken();
+    const loc = state.location;
+    const day = state.date;
+    const filter = encodeURIComponent(`fields/Location eq '${loc}' and fields/Date eq '${day}'`);
+    const url =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}` +
+      `/lists/${staffingListId}/items?$expand=fields($select=Location,Date,DataJson)&$filter=${filter}&$top=1`;
+    d2("Staffing: load URL", url);
+
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { console.error("[SP] Staffing load failed:", res.status, await res.text()); return; }
+    const json = await res.json();
+    if (!json.value || json.value.length === 0) { d2("Staffing: no item for", loc, day); return; }
+
+    const fields = json.value[0].fields || {};
+    let val = "";
+    try { val = fields.DataJson ? JSON.parse(fields.DataJson) : ""; }
+    catch (e) { console.warn("[SP] Staffing DataJson parse error:", e); val = ""; }
+
+    const d = store.getDay(state.location, state.date);
+    d.staffing = typeof val === "string" ? val : "";
+    store.save();
+    document.getElementById("staffingBox").value = d.staffing;
+    d2("Staffing: loaded OK", loc, day, (d.staffing||"").length);
+  } catch (err) {
+    console.error("[SP] Staffing load threw error:", err);
+  }
+}
 
 /* ------- Topbar & render ------- */
 function renderTopbar(d){
@@ -1001,8 +904,29 @@ function renderTopbar(d){
   document.getElementById("todayCount").value=d.todayCount||"";
   document.getElementById("podsLoc").textContent=`(${state.location})`;
 }
-document.getElementById("locationSel").onchange=e=>{state.location=e.target.value;renderAll();};
+document.getElementById("locationSel").onchange=async e=>{
+  state.location=e.target.value;
+  renderAll();
+  // load server state for new location/date
+  await Promise.all([
+    loadPodsFromSharePoint(),
+    loadTestsFromSharePoint(),
+    loadNotesFromSharePoint(),
+    loadStaffingFromSharePoint()
+  ]);
+};
+document.getElementById("dateSel").onchange=async e=>{
+  state.date=e.target.value;
+  renderAll();
+  await Promise.all([
+    loadPodsFromSharePoint(),
+    loadTestsFromSharePoint(),
+    loadNotesFromSharePoint(),
+    loadStaffingFromSharePoint()
+  ]);
+};
 
+/* Clear button: clears only day-scoped sections (not Equip/Build) */
 document.getElementById("clearLoc").onclick = () => {
   const d = store.getDay(state.location, state.date);
   d.pods = {};
@@ -1018,10 +942,19 @@ document.getElementById("clearLoc").onclick = () => {
   renderAll();
 };
 
-document.getElementById("dateSel").onchange=e=>{state.date=e.target.value;renderAll();};
-
-document.getElementById("pfcInput").onchange=()=>{const d=store.getDay(state.location,state.date); d.pfc=document.getElementById("pfcInput").value; store.save();};
-document.getElementById("todayCount").onchange=()=>{const d=store.getDay(state.location,state.date); d.todayCount=document.getElementById("todayCount").value; store.save();};
+/* PFC / Patient Count auto-save */
+document.getElementById("pfcInput").onchange=async ()=>{
+  const d=store.getDay(state.location,state.date);
+  d.pfc=document.getElementById("pfcInput").value; 
+  store.save();
+  await savePfcToSharePoint(d);
+};
+document.getElementById("todayCount").onchange=async ()=>{
+  const d=store.getDay(state.location,state.date);
+  d.todayCount=document.getElementById("todayCount").value; 
+  store.save();
+  await savePatientCountToSharePoint(d);
+};
 
 /* ------- Auto-fit Pods ------- */
 function fitPodsCard(){
@@ -1043,6 +976,7 @@ function applyPermissions(){
   const account = msalInstance.getAllAccounts()[0];
   const email = account ? account.username.toLowerCase() : "";
   const canEdit = allowedEditors.includes(email);
+  d2("Permissions: email/canEdit", email, canEdit);
   document.getElementById("equipAddRow").style.display=canEdit?"inline-block":"none";
   document.getElementById("buildAddRow").style.display=canEdit?"inline-block":"none";
 }
@@ -1073,16 +1007,20 @@ setInterval(() => {
   if (nowEl) nowEl.textContent = new Date().toLocaleString();
 }, 1000);
 
-/* ===== Force login on page load ===== */
+/* ===== Force login on page load, then initial loads ===== */
 document.addEventListener("DOMContentLoaded", async () => {
   try {
+    d2("DOMContentLoaded: ensureLogin()");
     await ensureLogin();
     renderAll();
-    await loadPodsFromSharePoint();
-    await loadTestsFromSharePoint();
-    await loadNotesFromSharePoint();
-    await loadStaffingFromSharePoint();
-    console.log("[MSAL] Login completed on page load");
+    d2("Initial loads: pods/tests/notes/staffing");
+    await Promise.all([
+      loadPodsFromSharePoint(),
+      loadTestsFromSharePoint(),
+      loadNotesFromSharePoint(),
+      loadStaffingFromSharePoint()
+    ]);
+    d2("Initial loads complete");
   } catch (err) {
     console.error("[MSAL] Login failed on page load:", err);
     const body = document.querySelector("body");
@@ -1099,6 +1037,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
