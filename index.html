@@ -371,15 +371,102 @@ async function savePatientCountToSharePoint(d) {
 
 /* ===== Equipment / Building (no Date; stored as DataJson arrays) ===== */
 async function saveEquipToSharePoint(d) {
-  // d expected shape: { equipment: [...] }
-  d1("Equip: saving (no date)", Array.isArray(d?.equipment) ? d.equipment.length : "no array");
-  await saveToListNoDate(equipListId, `${state.location} - Equipment`, d.equipment || []);
+  const payload = {
+    fields: {
+      Title: `${state.location} - Equipment`,
+      Location: state.location,
+      DataJson: JSON.stringify(d.equipment || [])
+    }
+  };
+
+  try {
+    const token = await getToken();
+    const findUrl =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${equipListId}/items?` +
+      `$select=id&$expand=fields($select=Location)&` +
+      `$filter=fields/Location eq '${state.location}'&$top=1`;
+
+    const findRes = await fetch(findUrl, { headers: { Authorization: `Bearer ${token}` } });
+
+    let method = "POST";
+    let target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${equipListId}/items`;
+
+    if (findRes.ok) {
+      const found = await findRes.json();
+      if (found.value && found.value.length) {
+        // Update instead of creating new
+        method = "PATCH";
+        target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${equipListId}/items/${found.value[0].id}/fields`;
+      }
+    }
+
+    const res = await fetch(target, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: method === "PATCH" ? JSON.stringify(payload.fields) : JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      console.error("[SP] Equip save failed:", res.status, await res.text());
+    } else {
+      console.log("[SP] Equip saved OK:", state.location);
+    }
+  } catch (e) {
+    console.error("[SP] Equip save threw:", e);
+  }
 }
+
 async function saveBuildToSharePoint(d) {
-  // d expected shape: { building: [...] }
-  d1("Build: saving (no date)", Array.isArray(d?.building) ? d.building.length : "no array");
-  await saveToListNoDate(buildListId, `${state.location} - Building`, d.building || []);
+  const payload = {
+    fields: {
+      Title: `${state.location} - Building`,
+      Location: state.location,
+      DataJson: JSON.stringify(d.building || [])
+    }
+  };
+
+  try {
+    const token = await getToken();
+    const findUrl =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${buildListId}/items?` +
+      `$select=id&$expand=fields($select=Location)&` +
+      `$filter=fields/Location eq '${state.location}'&$top=1`;
+
+    const findRes = await fetch(findUrl, { headers: { Authorization: `Bearer ${token}` } });
+
+    let method = "POST";
+    let target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${buildListId}/items`;
+
+    if (findRes.ok) {
+      const found = await findRes.json();
+      if (found.value && found.value.length) {
+        method = "PATCH";
+        target = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${buildListId}/items/${found.value[0].id}/fields`;
+      }
+    }
+
+    const res = await fetch(target, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: method === "PATCH" ? JSON.stringify(payload.fields) : JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      console.error("[SP] Build save failed:", res.status, await res.text());
+    } else {
+      console.log("[SP] Build saved OK:", state.location);
+    }
+  } catch (e) {
+    console.error("[SP] Build save threw:", e);
+  }
 }
+
 </script>
 
 <style>
@@ -894,7 +981,71 @@ async function loadStaffingFromSharePoint() {
     console.error("[SP] Staffing load threw error:", err);
   }
 }
+/* ===== Load Equipment (no Date) ===== */
+async function loadEquipFromSharePoint() {
+  try {
+    const token = await getToken();
+    const url =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${equipListId}/items?` +
+      `$expand=fields&$filter=fields/Location eq '${state.location}'&$top=1`;
 
+    console.log("[SP] Equip: load URL", url);
+
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+
+    if (!res.ok) {
+      console.error("[SP] Equip load failed:", res.status, await res.text());
+      return;
+    }
+
+    const json = await res.json();
+    if (json.value && json.value.length) {
+      const data = JSON.parse(json.value[0].fields.DataJson || "[]");
+      console.log("[SP] Equip: loaded OK", state.location, data);
+      state.equipment = data;
+      renderEquipment(); // assumes you have a render function
+    } else {
+      console.log("[SP] Equip: no entry found for", state.location);
+      state.equipment = [];
+      renderEquipment();
+    }
+  } catch (e) {
+    console.error("[SP] Equip load threw:", e);
+  }
+}
+
+/* ===== Load Building (no Date) ===== */
+async function loadBuildFromSharePoint() {
+  try {
+    const token = await getToken();
+    const url =
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${buildListId}/items?` +
+      `$expand=fields&$filter=fields/Location eq '${state.location}'&$top=1`;
+
+    console.log("[SP] Build: load URL", url);
+
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+
+    if (!res.ok) {
+      console.error("[SP] Build load failed:", res.status, await res.text());
+      return;
+    }
+
+    const json = await res.json();
+    if (json.value && json.value.length) {
+      const data = JSON.parse(json.value[0].fields.DataJson || "[]");
+      console.log("[SP] Build: loaded OK", state.location, data);
+      state.building = data;
+      renderBuilding(); // assumes you have a render function
+    } else {
+      console.log("[SP] Build: no entry found for", state.location);
+      state.building = [];
+      renderBuilding();
+    }
+  } catch (e) {
+    console.error("[SP] Build load threw:", e);
+  }
+}
 /* ------- Topbar & render ------- */
 function renderTopbar(d){
   const sel=document.getElementById("locationSel");
@@ -1013,14 +1164,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     d2("DOMContentLoaded: ensureLogin()");
     await ensureLogin();
     renderAll();
-    d2("Initial loads: pods/tests/notes/staffing");
-    await Promise.all([
-      loadPodsFromSharePoint(),
-      loadTestsFromSharePoint(),
-      loadNotesFromSharePoint(),
-      loadStaffingFromSharePoint()
-    ]);
-    d2("Initial loads complete");
+  d2("Initial loads: pods/tests/notes/staffing/equip/build");
+  await Promise.all([
+    loadPodsFromSharePoint(),
+    loadTestsFromSharePoint(),
+    loadNotesFromSharePoint(),
+    loadStaffingFromSharePoint(),
+    loadEquipFromSharePoint(),
+    loadBuildFromSharePoint()
+  ]);
+  d2("Initial loads complete");
+
   } catch (err) {
     console.error("[MSAL] Login failed on page load:", err);
     const body = document.querySelector("body");
@@ -1037,6 +1191,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
