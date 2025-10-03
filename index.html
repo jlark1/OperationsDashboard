@@ -7,6 +7,7 @@
 <!-- MSAL library -->
 <script src="https://alcdn.msauth.net/browser/2.38.1/js/msal-browser.min.js"></script>
 
+/* ===== Script 1 ===== */
 <script>
 /* ===== Debug toggle (Part 1) ===== */
 const DEBUG_P1 = true;
@@ -606,7 +607,7 @@ td input {
     </div>
   </div>
 </div>
-
+/* ===== Script 2 ===== */
 <script>
 /* ===== Debug toggle (Part 2) ===== */
 const DEBUG_P2 = true;
@@ -1091,7 +1092,9 @@ document.getElementById("locationSel").onchange=async e=>{
     loadPodsFromSharePoint(),
     loadTestsFromSharePoint(),
     loadNotesFromSharePoint(),
-    loadStaffingFromSharePoint()
+    loadStaffingFromSharePoint(),
+    loadEquipFromSharePoint(),
+    loadBuildFromSharePoint()
   ]);
 };
 document.getElementById("dateSel").onchange=async e=>{
@@ -1219,6 +1222,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
