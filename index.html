@@ -838,7 +838,7 @@ function equipRowHtml(r={},isNew=false){
     <td><input value="${r.notes||""}" data-f="notes"></td>
     <td>${isNew
       ? '<button class="btn saveRow">Save</button><button class="btn ghost cancelRow">Cancel</button>'
-      : '<button class="btn ghost deleteRow">Delete</button>'}
+      : '<button class="btn saveRow">Update</button><button class="btn ghost deleteRow">Delete</button>'}
     </td>
   </tr>`;
 }
@@ -870,18 +870,28 @@ document.getElementById("equipAddRow").onclick=()=>{
 
 document.querySelector("#equipTable tbody").addEventListener("click",async e=>{
   const equip=store.getEquip(state.location);
+  const tr=e.target.closest("tr");
+
   if(e.target.classList.contains("saveRow")){
-    const tr=e.target.closest("tr");
     const row={}; 
     [...tr.querySelectorAll("input,select")].forEach(i=>row[i.dataset.f]=i.value);
-    equip.push(row); 
+
+    const idx=[...tr.parentNode.children].indexOf(tr);
+    if (idx >= 0 && idx < equip.length) {
+      // Update existing row
+      equip[idx] = row;
+    } else {
+      // Add new row
+      equip.push(row);
+    }
     store.save(); 
     renderEquipTable(equip);
     await saveEquipToSharePoint({equipment:equip});
   }
-  if(e.target.classList.contains("cancelRow")) e.target.closest("tr").remove();
+
+  if(e.target.classList.contains("cancelRow")) tr.remove();
+
   if(e.target.classList.contains("deleteRow")){
-    const tr=e.target.closest("tr");
     const idx=[...tr.parentNode.children].indexOf(tr);
     equip.splice(idx,1); 
     store.save(); 
@@ -903,7 +913,7 @@ function buildRowHtml(r={},isNew=false){
     <td><input value="${r.notes||""}" data-f="notes"></td>
     <td>${isNew
       ? '<button class="btn saveRow">Save</button><button class="btn ghost cancelRow">Cancel</button>'
-      : '<button class="btn ghost deleteRow">Delete</button>'}
+      : '<button class="btn saveRow">Update</button><button class="btn ghost deleteRow">Delete</button>'}
     </td>
   </tr>`;
 }
@@ -935,18 +945,26 @@ document.getElementById("buildAddRow").onclick=()=>{
 
 document.querySelector("#buildTable tbody").addEventListener("click",async e=>{
   const build=store.getBuild(state.location);
+  const tr=e.target.closest("tr");
+
   if(e.target.classList.contains("saveRow")){
-    const tr=e.target.closest("tr");
     const row={}; 
     [...tr.querySelectorAll("input,select")].forEach(i=>row[i.dataset.f]=i.value);
-    build.push(row); 
+
+    const idx=[...tr.parentNode.children].indexOf(tr);
+    if (idx >= 0 && idx < build.length) {
+      build[idx] = row; // update existing
+    } else {
+      build.push(row); // add new
+    }
     store.save(); 
     renderBuildTable(build);
     await saveBuildToSharePoint({building:build});
   }
-  if(e.target.classList.contains("cancelRow")) e.target.closest("tr").remove();
+
+  if(e.target.classList.contains("cancelRow")) tr.remove();
+
   if(e.target.classList.contains("deleteRow")){
-    const tr=e.target.closest("tr");
     const idx=[...tr.parentNode.children].indexOf(tr);
     build.splice(idx,1); 
     store.save(); 
@@ -954,6 +972,7 @@ document.querySelector("#buildTable tbody").addEventListener("click",async e=>{
     await saveBuildToSharePoint({building:build});
   }
 });
+
 
 /* ------- Notes / Staffing (UI handlers call SP upsert) ------- */
 document.getElementById("notesSave").onclick=async ()=>{ 
@@ -1290,6 +1309,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
