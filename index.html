@@ -824,7 +824,16 @@ async function loadTestsFromSharePoint() {
 }
 
 /* ------- Equipment Issues ------- */
-function equipRowHtml(r={},isNew=false){ 
+function equipRowHtml(r={},isNew=false,canEdit=true){ 
+  if (!canEdit) {
+    return `<tr>
+      <td><span>${r.item||""}</span></td>
+      <td><span>${r.eta||""}</span></td>
+      <td><span>${r.status||""}</span></td>
+      <td><span>${r.notes||""}</span></td>
+      <td></td>
+    </tr>`;
+  }
   return `<tr>
     <td><input value="${r.item||""}" data-f="item"></td>
     <td><input value="${r.eta||""}" data-f="eta"></td>
@@ -837,10 +846,12 @@ function equipRowHtml(r={},isNew=false){
   </tr>`;
 }
 function renderEquipTable(equip){ 
-  document.querySelector("#equipTable tbody").innerHTML=(equip||[]).map(r=>equipRowHtml(r,false)).join(""); 
+  const canEdit = checkCanEdit();
+  document.querySelector("#equipTable tbody").innerHTML=(equip||[]).map(r=>equipRowHtml(r,false,canEdit)).join(""); 
 }
+
 document.getElementById("equipAddRow").onclick=()=>{ 
-  document.querySelector("#equipTable tbody").insertAdjacentHTML("beforeend", equipRowHtml({},true)); 
+  document.querySelector("#equipTable tbody").insertAdjacentHTML("beforeend", equipRowHtml({},true,true)); 
 };
 document.querySelector("#equipTable tbody").addEventListener("click",async e=>{
   const equip=store.getEquip(state.location);
@@ -865,7 +876,16 @@ document.querySelector("#equipTable tbody").addEventListener("click",async e=>{
 });
 
 /* ------- Building Maintenance ------- */
-function buildRowHtml(r={},isNew=false){ 
+function buildRowHtml(r={},isNew=false,canEdit=true){ 
+  if (!canEdit) {
+    return `<tr>
+      <td><span>${r.item||""}</span></td>
+      <td><span>${r.eta||""}</span></td>
+      <td><span>${r.status||""}</span></td>
+      <td><span>${r.notes||""}</span></td>
+      <td></td>
+    </tr>`;
+  }
   return `<tr>
     <td><input value="${r.item||""}" data-f="item"></td>
     <td><input value="${r.eta||""}" data-f="eta"></td>
@@ -878,10 +898,12 @@ function buildRowHtml(r={},isNew=false){
   </tr>`;
 }
 function renderBuildTable(build){ 
-  document.querySelector("#buildTable tbody").innerHTML=(build||[]).map(r=>buildRowHtml(r,false)).join(""); 
+  const canEdit = checkCanEdit();
+  document.querySelector("#buildTable tbody").innerHTML=(build||[]).map(r=>buildRowHtml(r,false,canEdit)).join(""); 
 }
+
 document.getElementById("buildAddRow").onclick=()=>{ 
-  document.querySelector("#buildTable tbody").insertAdjacentHTML("beforeend", buildRowHtml({},true)); 
+  document.querySelector("#buildTable tbody").insertAdjacentHTML("beforeend", buildRowHtml({},true,true)); 
 };
 document.querySelector("#buildTable tbody").addEventListener("click",async e=>{
   const build=store.getBuild(state.location);
@@ -904,6 +926,7 @@ document.querySelector("#buildTable tbody").addEventListener("click",async e=>{
     await saveBuildToSharePoint({building:build});
   }
 });
+
 
 /* ------- Notes / Staffing (UI handlers call SP upsert) ------- */
 document.getElementById("notesSave").onclick=async ()=>{ 
@@ -1152,6 +1175,14 @@ function fitPodsCard(){
   podsCard.style.maxHeight = available + 'px';
 }
 
+/* ------- Permissions helper ------- */
+function checkCanEdit(){
+  const account = msalInstance.getAllAccounts()[0];
+  const email = account ? account.username.toLowerCase() : "";
+  return allowedEditors.includes(email);
+}
+
+
 /* ------- Permissions check ------- */
 const allowedEditors=["tmonigold@associatedeyecare.com","sgeary@associatedeyecare.com","jlark@associatedeyecare.com"];
 function applyPermissions(){
@@ -1222,6 +1253,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
