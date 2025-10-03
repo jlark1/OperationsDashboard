@@ -1164,18 +1164,28 @@ document.getElementById("todayCount").onchange=async ()=>{
 };
 
 /* ------- Auto-fit Pods ------- */
-function fitPodsCard(){
-  const podsCard=document.getElementById('podsCard');
-  if(!podsCard) return;
-  const h1=document.querySelector('h1');
-  const topbar=document.querySelector('.topbar');
-  const bcs=getComputedStyle(document.body);
-  const bodyPad=parseInt(bcs.paddingTop||'12')+parseInt(bcs.paddingBottom||'12');
-  const headerH=(h1?h1.getBoundingClientRect().height:0)+(topbar?topbar.getBoundingClientRect().height:0);
-  const blueStrip=10;
-  const available=window.innerHeight - headerH - bodyPad - blueStrip;
+function fitPodsCard() {
+  const podsCard = document.getElementById('podsCard');
+  if (!podsCard) return;
+
+  const h1 = document.querySelector('h1');
+  const topbar = document.querySelector('.topbar');
+  const bcs = getComputedStyle(document.body);
+  const bodyPad = parseInt(bcs.paddingTop || '12') + parseInt(bcs.paddingBottom || '12');
+  const headerH = (h1 ? h1.getBoundingClientRect().height : 0) + (topbar ? topbar.getBoundingClientRect().height : 0);
+  const blueStrip = 10;
+
+  const available = window.innerHeight - headerH - bodyPad - blueStrip;
   podsCard.style.maxHeight = available + 'px';
+
+  // Add scrollbar only if content exceeds available space
+  if (podsCard.scrollHeight > available) {
+    podsCard.style.overflowY = 'auto';
+  } else {
+    podsCard.style.overflowY = 'visible';
+  }
 }
+
 
 /* ------- Permissions helper ------- */
 function checkCanEdit(){
@@ -1255,6 +1265,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
