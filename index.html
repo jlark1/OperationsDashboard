@@ -826,102 +826,132 @@ async function loadTestsFromSharePoint() {
 }
 
 /* ------- Equipment Issues ------- */
-function equipRowHtml(r = {}, isNew = false) {
+function equipRowHtml(r={},isNew=false){ 
   return `<tr>
-    <td><input value="${r.item || ""}" data-f="item"></td>
-    <td><input type="date" value="${r.eta || ""}" data-f="eta"></td>
+    <td><input value="${r.item||""}" data-f="item"></td>
+    <td><input type="date" value="${r.eta||""}" data-f="eta"></td>
     <td>
       <select data-f="status">
-        <option value="In Progress" ${(r.status || "In Progress") === "In Progress" ? "selected" : ""}>In Progress</option>
+        <option value="In Progress" ${r.status==="In Progress"?"selected":""}>In Progress</option>
       </select>
     </td>
-    <td><input value="${r.notes || ""}" data-f="notes"></td>
-    <td>${
-      isNew
-        ? '<button class="btn saveRow">Save</button><button class="btn ghost cancelRow">Cancel</button>'
-        : '<button class="btn ghost deleteRow">Delete</button>'
-    }</td>
+    <td><input value="${r.notes||""}" data-f="notes"></td>
+    <td>${isNew
+      ? '<button class="btn saveRow">Save</button><button class="btn ghost cancelRow">Cancel</button>'
+      : '<button class="btn ghost deleteRow">Delete</button>'}
+    </td>
   </tr>`;
 }
 
-function renderEquipTable(equip) {
-  document.querySelector("#equipTable tbody").innerHTML =
-    (equip || []).map(r => equipRowHtml(r, false)).join("");
+function renderEquipTable(equip){ 
+  const account = msalInstance.getAllAccounts()[0];
+  const email = account ? account.username.toLowerCase() : "";
+  const canEdit = allowedEditors.includes(email);
+
+  const rows = (equip||[]).map(r=>{
+    if (canEdit) {
+      return equipRowHtml(r,false);
+    } else {
+      return `<tr>
+        <td>${r.item||""}</td>
+        <td>${r.eta||""}</td>
+        <td>${r.status||""}</td>
+        <td>${r.notes||""}</td>
+        <td></td>
+      </tr>`;
+    }
+  }).join("");
+  document.querySelector("#equipTable tbody").innerHTML = rows;
 }
 
-document.getElementById("equipAddRow").onclick = () => {
-  document.querySelector("#equipTable tbody").insertAdjacentHTML("beforeend", equipRowHtml({}, true));
+document.getElementById("equipAddRow").onclick=()=>{ 
+  document.querySelector("#equipTable tbody").insertAdjacentHTML("beforeend", equipRowHtml({},true)); 
 };
 
-document.querySelector("#equipTable tbody").addEventListener("click", async e => {
-  const equip = store.getEquip(state.location);
-  if (e.target.classList.contains("saveRow")) {
-    const tr = e.target.closest("tr");
-    const row = {};
-    [...tr.querySelectorAll("input,select")].forEach(i => row[i.dataset.f] = i.value);
-    equip.push(row);
-    store.save();
+document.querySelector("#equipTable tbody").addEventListener("click",async e=>{
+  const equip=store.getEquip(state.location);
+  if(e.target.classList.contains("saveRow")){
+    const tr=e.target.closest("tr");
+    const row={}; 
+    [...tr.querySelectorAll("input,select")].forEach(i=>row[i.dataset.f]=i.value);
+    equip.push(row); 
+    store.save(); 
     renderEquipTable(equip);
-    await saveEquipToSharePoint({ equipment: equip });
+    await saveEquipToSharePoint({equipment:equip});
   }
-  if (e.target.classList.contains("cancelRow")) tr.remove();
-  if (e.target.classList.contains("deleteRow")) {
-    const tr = e.target.closest("tr");
-    const idx = [...tr.parentNode.children].indexOf(tr);
-    equip.splice(idx, 1);
-    store.save();
+  if(e.target.classList.contains("cancelRow")) e.target.closest("tr").remove();
+  if(e.target.classList.contains("deleteRow")){
+    const tr=e.target.closest("tr");
+    const idx=[...tr.parentNode.children].indexOf(tr);
+    equip.splice(idx,1); 
+    store.save(); 
     renderEquipTable(equip);
-    await saveEquipToSharePoint({ equipment: equip });
+    await saveEquipToSharePoint({equipment:equip});
   }
 });
 
 /* ------- Building Maintenance ------- */
-function buildRowHtml(r = {}, isNew = false) {
+function buildRowHtml(r={},isNew=false){ 
   return `<tr>
-    <td><input value="${r.item || ""}" data-f="item"></td>
-    <td><input type="date" value="${r.eta || ""}" data-f="eta"></td>
+    <td><input value="${r.item||""}" data-f="item"></td>
+    <td><input type="date" value="${r.eta||""}" data-f="eta"></td>
     <td>
       <select data-f="status">
-        <option value="In Progress" ${(r.status || "In Progress") === "In Progress" ? "selected" : ""}>In Progress</option>
+        <option value="In Progress" ${r.status==="In Progress"?"selected":""}>In Progress</option>
       </select>
     </td>
-    <td><input value="${r.notes || ""}" data-f="notes"></td>
-    <td>${
-      isNew
-        ? '<button class="btn saveRow">Save</button><button class="btn ghost cancelRow">Cancel</button>'
-        : '<button class="btn ghost deleteRow">Delete</button>'
-    }</td>
+    <td><input value="${r.notes||""}" data-f="notes"></td>
+    <td>${isNew
+      ? '<button class="btn saveRow">Save</button><button class="btn ghost cancelRow">Cancel</button>'
+      : '<button class="btn ghost deleteRow">Delete</button>'}
+    </td>
   </tr>`;
 }
 
-function renderBuildTable(build) {
-  document.querySelector("#buildTable tbody").innerHTML =
-    (build || []).map(r => buildRowHtml(r, false)).join("");
+function renderBuildTable(build){ 
+  const account = msalInstance.getAllAccounts()[0];
+  const email = account ? account.username.toLowerCase() : "";
+  const canEdit = allowedEditors.includes(email);
+
+  const rows = (build||[]).map(r=>{
+    if (canEdit) {
+      return buildRowHtml(r,false);
+    } else {
+      return `<tr>
+        <td>${r.item||""}</td>
+        <td>${r.eta||""}</td>
+        <td>${r.status||""}</td>
+        <td>${r.notes||""}</td>
+        <td></td>
+      </tr>`;
+    }
+  }).join("");
+  document.querySelector("#buildTable tbody").innerHTML = rows;
 }
 
-document.getElementById("buildAddRow").onclick = () => {
-  document.querySelector("#buildTable tbody").insertAdjacentHTML("beforeend", buildRowHtml({}, true));
+document.getElementById("buildAddRow").onclick=()=>{ 
+  document.querySelector("#buildTable tbody").insertAdjacentHTML("beforeend", buildRowHtml({},true)); 
 };
 
-document.querySelector("#buildTable tbody").addEventListener("click", async e => {
-  const build = store.getBuild(state.location);
-  if (e.target.classList.contains("saveRow")) {
-    const tr = e.target.closest("tr");
-    const row = {};
-    [...tr.querySelectorAll("input,select")].forEach(i => row[i.dataset.f] = i.value);
-    build.push(row);
-    store.save();
+document.querySelector("#buildTable tbody").addEventListener("click",async e=>{
+  const build=store.getBuild(state.location);
+  if(e.target.classList.contains("saveRow")){
+    const tr=e.target.closest("tr");
+    const row={}; 
+    [...tr.querySelectorAll("input,select")].forEach(i=>row[i.dataset.f]=i.value);
+    build.push(row); 
+    store.save(); 
     renderBuildTable(build);
-    await saveBuildToSharePoint({ building: build });
+    await saveBuildToSharePoint({building:build});
   }
-  if (e.target.classList.contains("cancelRow")) tr.remove();
-  if (e.target.classList.contains("deleteRow")) {
-    const tr = e.target.closest("tr");
-    const idx = [...tr.parentNode.children].indexOf(tr);
-    build.splice(idx, 1);
-    store.save();
+  if(e.target.classList.contains("cancelRow")) e.target.closest("tr").remove();
+  if(e.target.classList.contains("deleteRow")){
+    const tr=e.target.closest("tr");
+    const idx=[...tr.parentNode.children].indexOf(tr);
+    build.splice(idx,1); 
+    store.save(); 
     renderBuildTable(build);
-    await saveBuildToSharePoint({ building: build });
+    await saveBuildToSharePoint({building:build});
   }
 });
 
@@ -1260,6 +1290,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 </script>
 </body>
 </html>
+
 
 
 
