@@ -14,25 +14,27 @@
 const DEBUG_P1 = true;
 const d1 = (...args) => { if (DEBUG_P1) console.log("[P1]", ...args); };
 
-// -------------------------------------------------------
-// MSAL CONFIGURATION – supports both GitHub & AECFAX IIS
-// -------------------------------------------------------
+/* ===== MSAL + Microsoft Graph Configuration (Dual Environment) ===== */
 
 // Detect which environment the dashboard is running in
 const isInternal = window.location.hostname.toLowerCase().includes("aecfax");
 
-// Dynamic MSAL configuration
+// Define the scopes used during login and Graph access
+const loginScopes = ["openid", "profile", "User.Read"];
+const graphScopes = ["Sites.ReadWrite.All"];
+
+// Configure MSAL dynamically for each environment
 const msalConfig = {
   auth: {
-    // Use the correct Client ID based on where the code is running
+    // Use the correct Client ID depending on environment
     clientId: isInternal
-      ? "ec97e087-77d2-463f-b649-ecdd39c1c46f"  // Internal IIS app registration
+      ? "ec97e087-77d2-463f-b649-ecdd39c1c46f" // Internal IIS app registration
       : "ec19d272-57da-4130-b8a7-68500cbc0ba6", // GitHub app registration
 
-    // Always use the same authority (tenant)
+    // Always use the same tenant (Associated Eye Care)
     authority: "https://login.microsoftonline.com/2f061df2-aea0-4206-9047-e0b42ffd47b4",
 
-    // Redirect back to the right environment after login
+    // Redirect URI based on environment
     redirectUri: isInternal
       ? "https://aecfax/OperationsDashboard/"
       : "https://jlark1.github.io/OperationsDashboard/"
@@ -47,10 +49,8 @@ const msalConfig = {
   }
 };
 
-// Create MSAL instance (this part may already exist in your code)
+// Create MSAL instance
 const msalInstance = new msal.PublicClientApplication(msalConfig);
-
-
 
 /* ===== Login & Token ===== */
 async function ensureLogin() {
@@ -1381,3 +1381,4 @@ function showSaveConfirmation(sectionName) {
 </script>
 </body>
 </html>
+
