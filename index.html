@@ -17,7 +17,10 @@ const d1 = (...args) => { if (DEBUG_P1) console.log("[P1]", ...args); };
 // ***** MSAL CONFIGURATION - Supports both GitHub and internal IIS deployment *****
 
 // Detect which environment the dashboard is running in
-const isInternal = window.location.hostname.toLowerCase().includes("dashboard");
+const isInternal =
+  window.location.hostname.toLowerCase() === "dashboard" ||
+  window.location.hostname.toLowerCase() === "dashboard.aec.lan";
+
 
 // MSAL configuration
 const msalConfig = {
@@ -1378,6 +1381,7 @@ function showSaveConfirmation(sectionName) {
 </script>
 </body>
 </html>
+
 
 
 
