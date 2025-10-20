@@ -65,29 +65,57 @@ const loginScopes = ["openid", "profile", "User.Read"];
 const graphScopes = ["Sites.ReadWrite.All"];
 
 
-/* ===== Login & Token ===== */
+/* ====== Login & Token ====== */
 async function ensureLogin() {
+  // Get any existing account
   let account = msalInstance.getAllAccounts()[0];
   d1("ensureLogin: existing account?", !!account);
+
+  // If no active session, trigger login (safely)
   if (!account) {
     d1("ensureLogin: prompting loginPopup");
-    const resp = await msalInstance.loginPopup({ scopes: loginScopes, prompt: "select_account" });
-    msalInstance.setActiveAccount(resp.account);
-    account = resp.account;
+
+    // Prevent nested popup loops
+    if (window !== window.parent && window.opener) {
+      console.warn("[MSAL] Detected nested popup window. Skipping loginPopup to avoid recursion.");
+    } else {
+      const resp = await msalInstance.loginPopup({
+        scopes: loginScopes.scopes,
+        prompt: "select_account"
+      });
+      account = resp.account;
+      msalInstance.setActiveAccount(account);
+    }
   }
+
   d1("ensureLogin: active account", account?.username);
   return account;
 }
+
 async function getToken() {
   const account = await ensureLogin();
+
   try {
     d1("getToken: acquireTokenSilent");
-    const r = await msalInstance.acquireTokenSilent({ scopes: graphScopes, account });
+    const r = await msalInstance.acquireTokenSilent({
+      scopes: graphScopes,
+      account
+    });
     d1("getToken: success (silent)");
     return r.accessToken;
   } catch (e) {
     d1("getToken: silent failed, falling back to popup", e);
-    const r = await msalInstance.acquireTokenPopup({ scopes: graphScopes, account });
+
+    // Only open popup if not already inside one
+    if (window !== window.parent && window.opener) {
+      console.warn("[MSAL] Inside popup window; skipping acquireTokenPopup.");
+      throw new Error("Cannot open nested popup for token.");
+    }
+
+    const r = await msalInstance.acquireTokenPopup({
+      scopes: graphScopes,
+      account
+    });
     d1("getToken: success (popup)");
     return r.accessToken;
   }
@@ -1394,6 +1422,7 @@ function showSaveConfirmation(sectionName) {
 </script>
 </body>
 </html>
+
 
 
 
