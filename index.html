@@ -14,28 +14,26 @@
 const DEBUG_P1 = true;
 const d1 = (...args) => { if (DEBUG_P1) console.log("[P1]", ...args); };
 
-// ---------------------------------------------------------
-// MSAL CONFIGURATION - Supports both GitHub and AECFAX IIS
-// ---------------------------------------------------------
+// ***** MSAL CONFIGURATION - Supports both GitHub and internal IIS deployment *****
 
 // Detect which environment the dashboard is running in
-const isInternal = window.location.hostname.toLowerCase().includes("aecfax");
+const isInternal = window.location.hostname.toLowerCase().includes("dashboard");
 
 // MSAL configuration
 const msalConfig = {
   auth: {
     // Select correct Client ID based on environment
     clientId: isInternal
-      ? "ec97e087-77d2-463f-b649-ecdd39c1c46f"  // Internal IIS app registration
+      ? "ec7e0877-77d2-463f-b649-ecdd39c1c46f"  // Internal IIS app registration
       : "ec19d272-57da-4130-b8a7-68500bcb0ac6", // GitHub app registration
     authority: "https://login.microsoftonline.com/2f061df2-aea0-4206-9047-e0b42ffd47b4",
     redirectUri: isInternal
-      ? "https://aecfax/OperationsDashboard/"
+      ? "https://dashboard/"
       : "https://jlark1.github.io/OperationsDashboard/"
   },
   cache: {
     cacheLocation: "localStorage",
-    storeAuthStateInCookie: false
+    storeAuthStateInCookie: true
   },
   system: {
     allowNativeBroker: false,
@@ -1380,5 +1378,6 @@ function showSaveConfirmation(sectionName) {
 </script>
 </body>
 </html>
+
 
 
