@@ -21,6 +21,19 @@ const isInternal =
   window.location.hostname.toLowerCase() === "dashboard" ||
   window.location.hostname.toLowerCase() === "dashboard.aec.lan";
 
+// Debug info
+const currentHostname = window.location.hostname.toLowerCase();
+const environment = isInternal ? "Internal (IIS)" : "GitHub Demo";
+const redirectUri = isInternal
+  ? "https://dashboard/"
+  : "https://jlark1.github.io/OperationsDashboard/";
+
+console.log("====== Dashboard Debug Info ======");
+console.log("Detected environment:", environment);
+console.log("Hostname:", currentHostname);
+console.log("Using redirect URI:", redirectUri);
+console.log("==================================");
+
 
 // MSAL configuration
 const msalConfig = {
@@ -1381,6 +1394,7 @@ function showSaveConfirmation(sectionName) {
 </script>
 </body>
 </html>
+
 
 
 
