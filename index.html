@@ -21,51 +21,7 @@ const isInternal =
   window.location.hostname.toLowerCase() === "dashboard" ||
   window.location.hostname.toLowerCase() === "dashboard.aec.lan";
 
-// ===== View Mode Detection =====
-const urlParams = new URLSearchParams(window.location.search);
-const isViewMode =
-  window.location.hostname.toLowerCase() === "viewaecdashboard" ||
-  urlParams.get("mode") === "view";
-
-console.log("View Mode:", isViewMode ? "Enabled (View Only)" : "Disabled (Editable)");
-
-// ===== Auto-Refresh (only active in View Mode) =====
-if (isViewMode) {
-  const refreshMinutes = 5;
-  console.log(`Auto-refresh enabled: every ${refreshMinutes} minutes`);
-  setInterval(() => {
-    console.log("Refreshing dashboard (view-only mode)...");
-    window.location.reload();
-  }, refreshMinutes * 60 * 1000);
-}
-
-// ===== Disable Editing When in View Mode =====
-document.addEventListener("DOMContentLoaded", () => {
-  if (isViewMode) {
-    console.log("Disabling all editing controls (view-only mode).");
-
-    // Disable all input fields, textareas, and buttons
-    document.querySelectorAll("input, textarea, button").forEach(el => {
-      el.disabled = true;
-      el.style.cursor = "not-allowed";
-      el.title = "View-only mode: editing disabled";
-    });
-
-    // Add banner for clarity
-    const banner = document.createElement("div");
-    banner.textContent = "VIEW-ONLY MODE — Updates are disabled";
-    banner.style.cssText = `
-      background: #444;
-      color: white;
-      text-align: center;
-      padding: 6px;
-      font-weight: bold;
-    `;
-    document.body.prepend(banner);
-  }
-});
-
-// ===== Debug Info =====
+// Debug info
 const currentHostname = window.location.hostname.toLowerCase();
 const environment = isInternal ? "Internal (IIS)" : "GitHub Demo";
 const redirectUri = isInternal
@@ -78,15 +34,18 @@ console.log("Hostname:", currentHostname);
 console.log("Using redirect URI:", redirectUri);
 console.log("==================================");
 
+
 // MSAL configuration
 const msalConfig = {
   auth: {
     // Select correct Client ID based on environment
     clientId: isInternal
-      ? "ec97e087-77d2-463f-b649-ecdd39c1c46f"  // Internal IIS app registration
+      ? "ec7e0877-77d2-463f-b649-ecdd39c1c46f"  // Internal IIS app registration
       : "ec19d272-57da-4130-b8a7-68500bcb0ac6", // GitHub app registration
     authority: "https://login.microsoftonline.com/2f061df2-aea0-4206-9047-e0b42ffd47b4",
-    redirectUri: redirectUri
+    redirectUri: isInternal
+      ? "https://dashboard/"
+      : "https://jlark1.github.io/OperationsDashboard/"
   },
   cache: {
     cacheLocation: "localStorage",
@@ -104,6 +63,7 @@ const msalInstance = new msal.PublicClientApplication(msalConfig);
 // Define scopes
 const loginScopes = ["openid", "profile", "User.Read"];
 const graphScopes = ["Sites.ReadWrite.All"];
+
 
 /* ====== Login & Token ====== */
 async function ensureLogin() {
@@ -1462,8 +1422,6 @@ function showSaveConfirmation(sectionName) {
 </script>
 </body>
 </html>
-
-
 
 
 
