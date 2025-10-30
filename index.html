@@ -1403,20 +1403,38 @@ setInterval(() => {
 /* ===== Force login on page load, then initial loads ===== */
 document.addEventListener("DOMContentLoaded", async () => {
   try {
+    if (isViewMode) {
+      console.log("View-only mode detected — skipping login and running read-only load.");
+      renderAll();
+
+      d2("Initial loads (view-only): pods/tests/notes/staffing/equip/build");
+      await Promise.all([
+        loadPodsFromSharePoint(),
+        loadTestsFromSharePoint(),
+        loadNotesFromSharePoint(),
+        loadStaffingFromSharePoint(),
+        loadEquipFromSharePoint(),
+        loadBuildFromSharePoint()
+      ]);
+      d2("Initial loads complete (view-only)");
+      return; // stop here, skip login entirely
+    }
+
+    // Editable (normal) mode
     d2("DOMContentLoaded: ensureLogin()");
     await ensureLogin();
     renderAll();
-  d2("Initial loads: pods/tests/notes/staffing/equip/build");
-  await Promise.all([
-    loadPodsFromSharePoint(),
-    loadTestsFromSharePoint(),
-    loadNotesFromSharePoint(),
-    loadStaffingFromSharePoint(),
-    loadEquipFromSharePoint(),
-    loadBuildFromSharePoint()
-  ]);
-  d2("Initial loads complete");
 
+    d2("Initial loads: pods/tests/notes/staffing/equip/build");
+    await Promise.all([
+      loadPodsFromSharePoint(),
+      loadTestsFromSharePoint(),
+      loadNotesFromSharePoint(),
+      loadStaffingFromSharePoint(),
+      loadEquipFromSharePoint(),
+      loadBuildFromSharePoint()
+    ]);
+    d2("Initial loads complete");
   } catch (err) {
     console.error("[MSAL] Login failed on page load:", err);
     const body = document.querySelector("body");
@@ -1430,6 +1448,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 });
+
 /* ===== Save Confirmation Modal ===== */
 function showSaveConfirmation(sectionName) {
   // Remove existing popup if one is already visible
@@ -1471,6 +1490,7 @@ function showSaveConfirmation(sectionName) {
 </script>
 </body>
 </html>
+
 
 
 
