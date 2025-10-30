@@ -98,12 +98,18 @@ const msalConfig = {
   }
 };
 
-// Create MSAL instance
-const msalInstance = new msal.PublicClientApplication(msalConfig);
-
-// Define scopes
+let msalInstance = null;
 const loginScopes = ["openid", "profile", "User.Read"];
 const graphScopes = ["Sites.ReadWrite.All"];
+
+if (!isViewMode) {
+  // Only initialize MSAL if not in view-only mode
+  msalInstance = new msal.PublicClientApplication(msalConfig);
+  console.log("MSAL initialized for interactive login");
+} else {
+  console.log("View-only mode active: skipping MSAL initialization");
+}
+
 
 /* ====== Login & Token ====== */
 async function ensureLogin() {
@@ -1462,6 +1468,7 @@ function showSaveConfirmation(sectionName) {
 </script>
 </body>
 </html>
+
 
 
 
