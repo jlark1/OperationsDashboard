@@ -113,20 +113,21 @@ if (!isViewMode) {
 
 /* ====== Login & Token ====== */
 async function ensureLogin() {
-  // Get any existing account
+  if (isViewMode) {
+    console.log("View-only mode: skipping login completely.");
+    return null;
+  }
+
   let account = msalInstance.getAllAccounts()[0];
   d1("ensureLogin: existing account?", !!account);
 
-  // If no active session, trigger login (safely)
   if (!account) {
     d1("ensureLogin: prompting loginPopup");
-
-    // Prevent nested popup loops
     if (window !== window.parent && window.opener) {
       console.warn("[MSAL] Detected nested popup window. Skipping loginPopup to avoid recursion.");
     } else {
       const resp = await msalInstance.loginPopup({
-        scopes: loginScopes.scopes,
+        scopes: loginScopes,
         prompt: "select_account"
       });
       account = resp.account;
@@ -139,8 +140,12 @@ async function ensureLogin() {
 }
 
 async function getToken() {
-  const account = await ensureLogin();
+  if (isViewMode) {
+    console.log("View-only mode: skipping token request (read-only display)");
+    return null; // no token used in view mode
+  }
 
+  const account = await ensureLogin();
   try {
     d1("getToken: acquireTokenSilent");
     const r = await msalInstance.acquireTokenSilent({
@@ -151,13 +156,10 @@ async function getToken() {
     return r.accessToken;
   } catch (e) {
     d1("getToken: silent failed, falling back to popup", e);
-
-    // Only open popup if not already inside one
     if (window !== window.parent && window.opener) {
       console.warn("[MSAL] Inside popup window; skipping acquireTokenPopup.");
       throw new Error("Cannot open nested popup for token.");
     }
-
     const r = await msalInstance.acquireTokenPopup({
       scopes: graphScopes,
       account
@@ -166,6 +168,7 @@ async function getToken() {
     return r.accessToken;
   }
 }
+
 
 /* ===== SharePoint IDs ===== */
 const siteId = "associatedeyecareazure.sharepoint.com,f7f8c2bf-c387-440c-8d96-1373fb6e8517,adcaee90-7252-4f40-86f1-3d8c0dc8b216";
@@ -1468,6 +1471,7 @@ function showSaveConfirmation(sectionName) {
 </script>
 </body>
 </html>
+
 
 
 
