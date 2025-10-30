@@ -1405,19 +1405,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   try {
     if (isViewMode) {
       console.log("View-only mode detected — skipping login and running read-only load.");
-      renderAll();
-
-      d2("Initial loads (view-only): pods/tests/notes/staffing/equip/build");
-      await Promise.all([
-        loadPodsFromSharePoint(),
-        loadTestsFromSharePoint(),
-        loadNotesFromSharePoint(),
-        loadStaffingFromSharePoint(),
-        loadEquipFromSharePoint(),
-        loadBuildFromSharePoint()
-      ]);
-      d2("Initial loads complete (view-only)");
-      return; // stop here, skip login entirely
+      renderAll(); // renderAll() will handle its own view-only safe logic
+      return;
     }
 
     // Editable (normal) mode
@@ -1449,6 +1438,60 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 });
 
+/* ===== renderAll() ===== */
+async function renderAll() {
+  if (isViewMode) {
+    console.log("View-only mode: renderAll() skipping MSAL/token logic.");
+    try {
+      await Promise.all([
+        loadPodsFromSharePoint(),
+        loadTestsFromSharePoint(),
+        loadNotesFromSharePoint(),
+        loadStaffingFromSharePoint(),
+        loadEquipFromSharePoint(),
+        loadBuildFromSharePoint()
+      ]);
+      d2("Initial loads complete (view-only)");
+    } catch (err) {
+      console.error("Error loading view-only data:", err);
+    }
+    return;
+  }
+
+  const account = msalInstance.getAllAccounts()[0];
+  if (!account) {
+    console.warn("No logged-in account found, skipping renderAll().");
+    return;
+  }
+
+  d2("Initial loads: pods/tests/notes/staffing/equip/build");
+  await Promise.all([
+    loadPodsFromSharePoint(),
+    loadTestsFromSharePoint(),
+    loadNotesFromSharePoint(),
+    loadStaffingFromSharePoint(),
+    loadEquipFromSharePoint(),
+    loadBuildFromSharePoint()
+  ]);
+  d2("Initial loads complete");
+}
+
+/* ===== renderEquipTable() ===== */
+function renderEquipTable() {
+  if (isViewMode) {
+    console.log("View-only mode: skipping renderEquipTable() MSAL logic.");
+    return;
+  }
+
+  const account = msalInstance.getAllAccounts()[0];
+  if (!account) {
+    console.warn("renderEquipTable: no account, skipping.");
+    return;
+  }
+
+  // existing table rendering logic stays here
+}
+
 /* ===== Save Confirmation Modal ===== */
 function showSaveConfirmation(sectionName) {
   // Remove existing popup if one is already visible
@@ -1461,7 +1504,7 @@ function showSaveConfirmation(sectionName) {
   popup.style.top = "30%";
   popup.style.left = "50%";
   popup.style.transform = "translate(-50%, -50%)";
-  popup.style.background = "rgba(0, 102, 153, 0.95)"; // AEC blue tone
+  popup.style.background = "rgba(0, 102, 153, 0.95)";
   popup.style.color = "white";
   popup.style.padding = "16px 28px";
   popup.style.borderRadius = "10px";
@@ -1486,10 +1529,11 @@ function showSaveConfirmation(sectionName) {
   setTimeout(() => popup.remove(), 2600);
 }
 
-  
 </script>
 </body>
 </html>
+
+
 
 
 
